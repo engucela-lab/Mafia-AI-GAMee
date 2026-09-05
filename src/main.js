@@ -187,7 +187,7 @@ const init = async () => {
 
     // Game Logic
     const ui = new UIController(audio); // Pass audio to UI
-    ui.onSpeak = (player, text) => speakWithFish(text, gameSettings);
+    ui.onSpeak = (player, text) => speakWithFish(text, gameSettings, player);
     const game = new MafiaGame(players, ui, environment, audio, achievements); // Pass audio to Game
     
     // Main Menu Logic
@@ -299,6 +299,7 @@ const init = async () => {
             endpoint: savedPlayer.endpoint || '',
             model,
             apiKey: savedPlayer.apiKey || '',
+            fishVoiceId: savedPlayer.fishVoiceId || storedSetting('fishVoiceId', '') || '',
             personality: savedPlayer.personality || defaultProfiles[index]?.personality || 'Observant and strategic.',
             img: savedPlayer.img || defaultProfiles[index]?.img || 'avatar_texture.png'
         };
@@ -433,6 +434,7 @@ const init = async () => {
                     <label>Player API key<input data-field="apiKey" data-index="${index}" type="password" value="${escapeHtml(player.apiKey || '')}" placeholder="Selected provider key"></label>
                     <label>Logo PNG filename<input data-field="img" data-index="${index}" value="${escapeHtml(player.img || '')}" placeholder="logo_gemini.png"></label>
                     <label class="ai-personality">Personality<textarea data-field="personality" data-index="${index}" rows="2" placeholder="Calm, suspicious, dramatic...">${escapeHtml(player.personality || '')}</textarea></label>
+                    <label>Fish Audio voice/reference ID<input data-field="fishVoiceId" data-index="${index}" value="${escapeHtml(player.fishVoiceId || '')}" placeholder="Player voice reference ID"></label>
                 </div>`;
             container.appendChild(card);
             const provider = card.querySelector('[data-field="provider"]');
@@ -477,6 +479,7 @@ const init = async () => {
             endpoint: read('endpoint'),
             model: read('model') || PROVIDER_DEFAULT_MODELS[read('provider') || 'gemini'] || DEFAULT_AI_MODEL,
             apiKey: read('apiKey'),
+            fishVoiceId: read('fishVoiceId'),
             personality: read('personality') || defaultProfiles[index]?.personality || 'Observant and strategic.',
             img: read('img') || defaultProfiles[index]?.img || 'avatar_texture.png'
         };
@@ -489,7 +492,6 @@ const init = async () => {
             schedulerApiKey: gameSettings.schedulerApiKey,
             schedulerModel: gameSettings.schedulerModel,
             fishApiKey: gameSettings.fishApiKey,
-            fishVoiceId: gameSettings.fishVoiceId,
             fishModel: gameSettings.fishModel,
             fishEnabled: gameSettings.fishEnabled,
             aiPlayers: gameSettings.aiPlayers
@@ -498,7 +500,6 @@ const init = async () => {
         localStorage.setItem('mafia_gemini_api_key', gameSettings.geminiApiKey);
         localStorage.setItem('mafia_gemini_model', gameSettings.geminiModel);
         localStorage.setItem('mafia_fish_api_key', gameSettings.fishApiKey);
-        localStorage.setItem('mafia_fish_voice_id', gameSettings.fishVoiceId);
         localStorage.setItem('mafia_fish_model', gameSettings.fishModel);
         localStorage.setItem('mafia_fish_enabled', String(gameSettings.fishEnabled));
         localStorage.setItem('mafia_ai_players', JSON.stringify(gameSettings.aiPlayers));
@@ -524,7 +525,6 @@ const init = async () => {
         document.getElementById('setting-scheduler-key').value = gameSettings.schedulerApiKey;
         document.getElementById('setting-scheduler-model').value = gameSettings.schedulerModel;
         document.getElementById('setting-fish-key').value = gameSettings.fishApiKey;
-        document.getElementById('setting-fish-voice').value = gameSettings.fishVoiceId;
         document.getElementById('setting-fish-model').value = gameSettings.fishModel;
     });
 
@@ -534,13 +534,13 @@ const init = async () => {
         gameSettings.schedulerApiKey = document.getElementById('setting-scheduler-key').value.trim();
         gameSettings.schedulerModel = document.getElementById('setting-scheduler-model').value.trim();
         gameSettings.fishApiKey = document.getElementById('setting-fish-key').value.trim();
-        gameSettings.fishVoiceId = document.getElementById('setting-fish-voice').value.trim();
         gameSettings.fishModel = document.getElementById('setting-fish-model').value.trim() || DEFAULT_FISH_MODEL;
-        gameSettings.fishEnabled = Boolean(gameSettings.fishApiKey && gameSettings.fishVoiceId);
+        gameSettings.aiPlayers = captureAIPlayers();
+        gameSettings.fishEnabled = Boolean(gameSettings.fishApiKey && gameSettings.aiPlayers.some(player => player.fishVoiceId));
         persistAISettings();
     };
 
-    ['setting-gemini-key', 'setting-gemini-model', 'setting-scheduler-key', 'setting-scheduler-model', 'setting-fish-key', 'setting-fish-voice', 'setting-fish-model']
+    ['setting-gemini-key', 'setting-gemini-model', 'setting-scheduler-key', 'setting-scheduler-model', 'setting-fish-key', 'setting-fish-model']
         .forEach(id => document.getElementById(id).addEventListener('input', syncGlobalAISettings));
 
     document.getElementById('btn-add-ai-player').addEventListener('click', () => {
@@ -552,6 +552,7 @@ const init = async () => {
             endpoint: '',
             model: DEFAULT_AI_MODEL,
             apiKey: '',
+            fishVoiceId: '',
             personality: defaultProfiles[index]?.personality || 'Observant and strategic.',
             img: defaultProfiles[index]?.img || 'avatar_texture.png'
         });
