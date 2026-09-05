@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Mafia Table</title>
+    <link rel="stylesheet" href="style.css">
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://esm.sh/three@0.160.0",
+                "three/addons/": "https://esm.sh/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="game-container"></div>
+
+    <!-- Game Dashboard -->
+    <div id="game-dashboard">
+        <div class="dashboard-content">
+            <div class="dashboard-kicker">AI PLAYS</div>
+            <h1 class="dashboard-title">Choose a game</h1>
+            <div class="game-library" aria-label="Available games">
+                <button id="btn-open-mafia" class="game-card" type="button">
+                    <span class="game-card-icon" aria-hidden="true">♠</span>
+                    <span class="game-card-copy">
+                        <strong>MAFIA TABLE</strong>
+                        <small>Social deduction</small>
+                    </span>
+                    <span class="game-card-arrow" aria-hidden="true">→</span>
+                </button>
+                <a id="btn-open-among-us" class="game-card" href="./among-us.html">
+                    <span class="game-card-icon among-us-card-icon" aria-hidden="true">●</span>
+                    <span class="game-card-copy">
+                        <strong>AMONG US</strong>
+                        <small>AI plays · Skeld template</small>
+                    </span>
+                    <span class="game-card-arrow" aria-hidden="true">→</span>
+                </a>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Welcome Message Overlay -->
+    <div id="welcome-message-overlay" class="hidden">
+        <div class="folder-content">
+            <div class="folder-tab">📁 UPDATE_MSG.txt</div>
+            <div class="folder-paper">
+                <h2>🎉 WELCOME BACK! 🎉</h2>
+                <div class="folder-text">
+                    <p>Hello! Welcome to the latest update of Mafia Table.</p>
+                    <p>Configure your AI players, then start the game.</p>
+                </div>
+                <div class="folder-action">
+                    <button id="btn-close-welcome">LET'S PLAY!</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Menu -->
+    <div id="main-menu" class="hidden">
+        <div class="menu-content">
+            <button id="btn-back-dashboard" class="menu-btn small dashboard-back-btn" type="button">← BACK TO DASHBOARD</button>
+            <h1 class="title-large">Mafia<br>Table</h1>
+            
+            <div class="menu-layout-container">
+                <div class="main-action-area">
+                    <button id="btn-play" class="menu-btn play-btn-large">START GAME</button>
+                </div>
+                
+                <div class="secondary-grid">
+                    <button id="btn-customize" class="menu-btn grid-btn" style="border-color: #9D65FF;">
+                        <span>🎨</span> Customize
+                    </button>
+                    <button id="btn-settings" class="menu-btn grid-btn">
+                        <span>⚙️</span> Settings
+                    </button>
+                    <button id="btn-achievements" class="menu-btn grid-btn">
+                        <span>🏆</span> Achievements
+                    </button>
+                    <button id="btn-info" class="menu-btn grid-btn" style="border-color: #4488ff;">
+                        <span>📖</span> Role Info
+                    </button>
+                    <button id="btn-how-to" class="menu-btn grid-btn" style="border-color: #ff9900;">
+                        <span>❓</span> How to Play
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div id="how-to-modal" class="hidden">
+            <h2>HOW TO PLAY</h2>
+            <div class="how-to-content">
+                <div class="guide-section">
+                    <h3>🎭 THE BASICS</h3>
+                    <p>Mafia Table is a social deduction game. The innocent town roles win by eliminating the Mafia. The Vigilante has one shot and may skip the kill.</p>
+                </div>
+                <div class="guide-section">
+                    <h3>🕒 GAME PHASES</h3>
+                    <p><strong>DAY:</strong> Discussion and public voting. Players argue, share information, or lie.</p>
+                    <p><strong>NIGHT:</strong> Mafia discusses, then votes on one victim. The Doctor protects someone, the Sheriff investigates, and the Vigilante may use or hold one shot.</p>
+                </div>
+                <div class="guide-section" style="border-left-color: #ff4444;">
+                    <h3>🩸 BLOOD NIGHTS (FINAL SHOWDOWN)</h3>
+                    <p>When only two players remain, the final vote or night action decides who controls the table.</p>
+                </div>
+                <div class="guide-section" style="border-left-color: #9D65FF;">
+                    <h3>🎨 CHARACTER CUSTOMIZATION</h3>
+                    <p>Use Customize for avatars. Use Settings → AI Players for each player’s name, provider, model, key, and personality.</p>
+                </div>
+                <div class="guide-section" style="border-left-color: #4488ff;">
+                    <h3>🗣️ PRIORITY SPEAK</h3>
+                    <p>Each AI rates its own thoughts and message from 1–10. The scheduler reads every candidate, favors relevant answers and quiet players, and prevents back-to-back speakers.</p>
+                </div>
+                <div class="guide-section" style="border-left-color: #32cd32;">
+                    <h3>☣️ THE PLAGUE & ROLES</h3>
+                    <p>The available roles are Mafia, Villager, Sheriff, Doctor, and Vigilante. The Vigilante has one shot and may skip the kill.</p>
+                </div>
+                <div class="guide-section">
+                    <h3>🔥 CHAOS & PHYSICS</h3>
+                    <p>Enable <strong>Chaos Mode</strong> to remove all dialogue turns; everyone screams at once! <strong>Ragdoll Physics</strong> causes players to fly around the room like tennis balls when shot or executed.</p>
+                </div>
+                <div class="guide-section" style="border-left-color: #ff0000;">
+                    <h3>😈 TROLL PANEL</h3>
+                    <p>If enabled in Settings, use the <strong>Troll Panel</strong> to manipulate the simulation. You can force votes, revive dead players, silence anyone, skip phases, or even <strong>Force Speech</strong> to make bots say whatever you type.</p>
+                </div>
+                <div class="guide-section" style="border-left-color: #ffd700;">
+                    <h3>🏆 ACHIEVEMENTS & RECORDING</h3>
+                    <p>Complete challenges to unlock <strong>Achievements</strong>. Enable <strong>Record Game</strong> to capture a .webm video of your match including the 3D action and dialogue.</p>
+                </div>
+            </div>
+            <button id="btn-close-how-to" class="menu-btn small">BACK</button>
+        </div>
+        
+        <div id="customize-modal" class="hidden">
+            <h2>CUSTOMIZE CHARACTERS</h2>
+            <div class="customize-container">
+                <div class="char-list-panel">
+                    <h3>ROSTER</h3>
+                    <div class="char-list" id="customize-char-list">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+                <div class="char-editor-panel">
+                    <div class="preview-section">
+                        <div class="avatar-preview-container">
+                            <img id="cust-preview-img" src="avatar_texture.png" alt="Preview">
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
+                            <label class="upload-btn menu-btn small" style="font-size: 0.8rem; padding: 5px 10px; cursor: pointer; display: inline-block; width: auto; margin-top: 0;">
+                                📸 UPLOAD IMAGE
+                                <input type="file" id="cust-file" accept="image/*" hidden>
+                            </label>
+                            <button id="btn-randomize-bot" class="menu-btn small" style="font-size: 0.8rem; padding: 5px 10px; margin-top: 0; border-color: #ffd700; color: #ffd700; width: auto;">
+                                🎲 RANDOMIZE
+                            </button>
+                        </div>
+                    </div>
+                    <div class="fields-section">
+                        <div class="editor-group">
+                            <label>Name</label>
+                            <input type="text" id="cust-name" maxlength="12">
+                        </div>
+                        <div class="editor-group">
+                            <label>Personality</label>
+                            <textarea id="cust-personality" rows="3" placeholder="e.g. Aggressive, sarcastic..."></textarea>
+                        </div>
+                        <div class="editor-group">
+                            <label>Guaranteed Role</label>
+                            <select id="cust-role" class="setting-select" style="margin-top: 0;">
+                                <option value="">Random</option>
+                                <option value="CITIZEN">Villager</option>
+                                <option value="MAFIA">Mafia</option>
+                                <option value="SHERIFF">Sheriff</option>
+                                <option value="HEALER">Doctor</option>
+                                <option value="VIGILANTE">Vigilante</option>
+                            </select>
+                        </div>
+                        <button id="btn-save-char" class="menu-btn small highlight">APPLY TO SLOT</button>
+                    </div>
+                </div>
+            </div>
+            <div class="customize-footer">
+                <button id="btn-close-customize" class="menu-btn small">SAVE & CLOSE</button>
+                <button id="btn-reset-customize" class="menu-btn small" style="border-color: #ff4444; color: #ff4444;">RESET DEFAULTS</button>
+            </div>
+        </div>
+
+        <div id="achievements-modal" class="hidden">
+            <h2>ACHIEVEMENTS</h2>
+            <div id="achievements-list" class="achievements-content">
+                <!-- Populated via JS -->
+            </div>
+            <button id="btn-close-achievements" class="menu-btn small">BACK</button>
+        </div>
+
+        <div id="info-modal" class="hidden">
+            <h2>ROLE ENCYCLOPEDIA</h2>
+            <div id="role-info-list" class="info-content">
+                <!-- Populated via JS -->
+            </div>
+            <button id="btn-close-info" class="menu-btn small">BACK</button>
+        </div>
+
+        <div id="settings-modal" class="hidden">
+            <h2>GAME SETTINGS</h2>
+            <div class="settings-options">
+                <div id="chaos-setting-container">
+                    <label class="setting-toggle">
+                        <input type="checkbox" id="setting-chaos">
+                        <div class="setting-label">
+                            <span class="setting-name">🔥 CHAOS MODE 🔥</span>
+                            <span class="setting-desc">Everyone talks at once. Mafia kills 3x. Ragdoll physics.</span>
+                        </div>
+                    </label>
+                </div>
+                <label class="setting-toggle">
+                    <input type="checkbox" id="setting-play-with-them">
+                    <div class="setting-label">
+                        <span class="setting-name">Play With Them</span>
+                        <span class="setting-desc">Join the table as a player. Chat, vote, and win.</span>
+                    </div>
+                </label>
+                <label class="setting-toggle">
+                    <input type="checkbox" id="setting-mute-music">
+                    <div class="setting-label">
+                        <span class="setting-name">Mute Music</span>
+                        <span class="setting-desc">Silence the background music while keeping sound effects.</span>
+                    </div>
+                </label>
+                <label class="setting-toggle">
+                    <input type="checkbox" id="setting-disable-abstaining">
+                    <div class="setting-label">
+                        <span class="setting-name">Disable Abstaining</span>
+                        <span class="setting-desc">Force everyone (including bots) to vote for a target. No skipping allowed.</span>
+                    </div>
+                </label>
+                <label class="setting-toggle">
+                    <input type="checkbox" id="setting-ragdolls">
+                    <div class="setting-label">
+                        <span class="setting-name">Ragdoll Physics</span>
+                        <span class="setting-desc">Players fly around like tennis balls when eliminated.</span>
+                    </div>
+                </label>
+                <label class="setting-toggle">
+                    <input type="checkbox" id="setting-record">
+                    <div class="setting-label">
+                        <span class="setting-name">🎥 Record Game</span>
+                        <span class="setting-desc">Capture video of the game (3D & dialogue). Download starts when game ends.</span>
+                    </div>
+                </label>
+                <label class="setting-toggle">
+                    <input type="checkbox" id="setting-show-troll-panel">
+                    <div class="setting-label">
+                        <span class="setting-name">😈 Enable Troll Panel</span>
+                        <span class="setting-desc">Show the panel that lets you manipulate bots and the game state during play.</span>
+                    </div>
+                </label>
+                <label class="setting-toggle">
+                    <input type="checkbox" id="setting-hide-roles">
+                    <div class="setting-label">
+                        <span class="setting-name">🕵️ Mystery Mode</span>
+                        <span class="setting-desc">Hide all bot roles from 3D labels and the player list by default.</span>
+                    </div>
+                </label>
+                
+                <div id="role-selector-container" class="hidden" style="width: 100%; box-sizing: border-box; background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px;">
+                    <div class="setting-label" style="margin-bottom: 10px;">
+                        <span class="setting-name" style="color: #ffd700;">⭐ CHOOSE YOUR ROLE ⭐</span>
+                        <span class="setting-desc">Force your role when playing.</span>
+                    </div>
+                    <select id="setting-user-role" class="setting-select">
+                        <option value="RANDOM">Random Role</option>
+                        <option value="MAFIA">Mafia</option>
+                        <option value="SHERIFF">Sheriff</option>
+                        <option value="HEALER">Doctor</option>
+                        <option value="VIGILANTE">Vigilante</option>
+                        <option value="CITIZEN">Villager</option>
+                    </select>
+                </div>
+
+                <div class="settings-section-title">AI PLAYERS</div>
+                <p class="settings-note">Player keys, models, providers, logos, and personalities are saved in this browser. Blank scheduler fields fall back to the global Gemini settings.</p>
+                <div class="ai-global-grid">
+                    <label>Global Gemini key<input id="setting-gemini-key" type="password" placeholder="AIza..."></label>
+                    <label>Global Gemini model<input id="setting-gemini-model" type="text" value="gemini-3.5-flash-lite"></label>
+                    <label>Scheduler Gemini key<input id="setting-scheduler-key" type="password" placeholder="Blank = global key"></label>
+                    <label>Scheduler Gemini model<input id="setting-scheduler-model" type="text" placeholder="Blank = global model"></label>
+                </div>
+                <datalist id="ai-model-presets">
+                    <option value="gemini-3.5-flash-lite"></option>
+                    <option value="gemini-2.0-flash"></option>
+                    <option value="gpt-4o-mini"></option>
+                    <option value="claude-3-5-haiku-latest"></option>
+                    <option value="deepseek-chat"></option>
+                    <option value="openai/gpt-4o-mini"></option>
+                </datalist>
+                <div id="ai-player-list" class="ai-player-list"></div>
+                <button id="btn-add-ai-player" class="menu-btn small add-ai-player">+ ADD AI PLAYER</button>
+
+                <div class="settings-section-title fish-title">FISH AUDIO · GLOBAL VOICE</div>
+                <p class="settings-note">Optional spoken dialogue. The response is read as streamed network chunks.</p>
+                <div class="ai-global-grid">
+                    <label>Fish Audio API key<input id="setting-fish-key" type="password" placeholder="Fish API key"></label>
+                    <label>Voice / reference ID<input id="setting-fish-voice" type="text" placeholder="Voice model ID"></label>
+                    <label>Fish model<input id="setting-fish-model" type="text" value="s2.1-pro-free"></label>
+                    <label>Stream type<select id="setting-fish-stream" disabled><option value="chunk">Chunk</option></select></label>
+                </div>
+            </div>
+            <button id="btn-close-settings" class="menu-btn small">SAVE & BACK</button>
+            <button id="btn-reset-data" class="menu-btn small" style="margin-top: 15px; font-size: 0.8rem; border-color: #ff4444; color: #ff4444; opacity: 0.8;">RESET DATA</button>
+        </div>
+
+
+    </div>
+
+    <div id="version-text">V1.6 Cinematic Update!</div>
+
+    <div id="version-modal" class="hidden">
+        <h2>VERSION HISTORY</h2>
+        <div class="version-list">
+            <div class="version-item">
+                <span class="v-tag">V1.6</span>
+                <span class="v-desc">Cinematic Update: five-role Mafia rules, AI personalities, isolated match memory, scheduler fairness, recording, and the Troll Panel.</span>
+            </div>
+            <div class="version-item">
+                <span class="v-tag">V1.5</span>
+                <span class="v-desc">New Years Update: Battle Pass Tier 2, Character Creator, Chaos Mode Physics.</span>
+            </div>
+            <div class="version-item">
+                <span class="v-tag">V1.4</span>
+                <span class="v-desc">Achievements System, Bug Fixes, Improved Suggestion Box (removed).</span>
+            </div>
+            <div class="version-item">
+                <span class="v-tag">V1.3</span>
+                <span class="v-desc">Christmas Event: Snowy Map, Santa Hats, Holiday Music.</span>
+            </div>
+            <div class="version-item">
+                <span class="v-tag">V1.2</span>
+                <span class="v-desc">Role Update: the streamlined Mafia Table roles were added.</span>
+            </div>
+            <div class="version-item">
+                <span class="v-tag">V1.1</span>
+                <span class="v-desc">Mobile Optimization & Performance Improvements.</span>
+            </div>
+            <div class="version-item">
+                <span class="v-tag">V1.0</span>
+                <span class="v-desc">Initial Release: Mafia Table.</span>
+            </div>
+        </div>
+        <button id="btn-close-version" class="menu-btn small">CLOSE</button>
+    </div>
+
+    <!-- Achievement Notification -->
+    <div id="achievement-notification">
+        <div id="achievement-notify-icon">🏆</div>
+        <div class="achievement-notify-text">
+            <div class="notify-header">ACHIEVEMENT UNLOCKED</div>
+            <div id="achievement-notify-title">Title</div>
+            <div id="achievement-notify-desc">Description goes here</div>
+        </div>
+    </div>
+
+    <div id="loading-screen" class="hidden">
+        <div class="loading-content">
+            <div class="loading-status-line">
+                <span id="loading-stage-text">Initializing...</span>
+                <span id="loading-percent">0%</span>
+            </div>
+            <div class="loading-bar-container">
+                <div id="loading-bar-fill"></div>
+            </div>
+            <div class="loading-tips-container">
+                <p id="loading-tip-text"></p>
+            </div>
+        </div>
+    </div>
+
+    <div id="ui-layer" class="hidden">
+        <button id="btn-exit" class="menu-btn small">EXIT</button>
+        <div id="game-header">
+            <h1>Mafia Table</h1>
+            <div id="game-status">Initializing...</div>
+            <div id="phase-timer" class="hidden" aria-live="polite">00:00</div>
+        </div>
+        <button id="list-toggle-btn" aria-label="Toggle Player List">👥</button>
+        <button id="btn-pause" class="icon-btn-floating hidden" title="Pause Game">⏸</button>
+        <button id="btn-priority-user" class="hidden">SPEAK NEXT 🗣️</button>
+        <div id="day-actions-hud" class="hidden" style="position: absolute; bottom: 180px; right: 20px; display: flex; flex-direction: column; gap: 10px; pointer-events: auto;">
+            <button id="btn-mayor-reveal" class="menu-btn small highlight" style="background: #ffd700; color: #000; display: none;">REVEAL AS MAYOR 👑</button>
+            <button id="btn-deputy-execute" class="menu-btn small highlight" style="background: #ff4444; color: #fff; display: none;">PUBLIC EXECUTION ⚖️</button>
+        </div>
+        <div id="player-list" class="hidden"></div>
+        <div id="bubble-container"></div>
+        
+        <div id="announcement-overlay">
+            <div id="announcement-title"></div>
+            <div id="announcement-subtitle"></div>
+        </div>
+
+        <div id="dialogue-box">
+            <img id="dialogue-avatar" src="" alt="">
+            <div id="dialogue-content">
+                <div id="dialogue-name"></div>
+                <div id="dialogue-text"></div>
+            </div>
+        </div>
+
+        <!-- User Input UI -->
+        <div id="user-input-container" class="hidden">
+            <div class="input-wrapper">
+                <input type="text" id="user-chat-input" placeholder="Type your message..." autocomplete="off">
+                <button id="user-chat-send">SEND</button>
+            </div>
+        </div>
+
+        <!-- User Action/Choice UI -->
+        <div id="user-action-container" class="hidden">
+            <h2 id="action-title">Choose your target</h2>
+            <div id="action-buttons"></div>
+        </div>
+
+        <!-- Private Thought Box -->
+        <div id="private-thought-box" class="hidden">
+            <div class="thought-header">🧠 PRIVATE STRATEGY</div>
+            <div id="thought-text"></div>
+        </div>
+
+        <!-- Troll Panel -->
+        <div id="troll-panel" class="hidden">
+            <div class="troll-header">😈 TROLL PANEL</div>
+            <div class="troll-grid">
+                <button id="troll-force-vote" title="Select someone to be immediately executed by the town">FORCE VOTES</button>
+                <button id="troll-kill-random" title="Choose a player to eliminate immediately">SUDDEN DEATH</button>
+                <button id="troll-reveal-roles" title="Briefly show everyone's true identity">ROLE PEEK</button>
+                <button id="troll-silence-all" title="Prevent everyone from speaking tomorrow">SILENCE ALL</button>
+                <button id="troll-revive-all" title="Bring everyone back to life">MASS REVIVE</button>
+                <button id="troll-skip-phase" title="Skip to the next game phase">SKIP PHASE</button>
+            <button id="troll-force-speech" title="Make any bot say exactly what you want">FORCE SPEECH</button>
+            </div>
+        </div>
+    </div>
+    <script type="module" src="./src/main.js"></script>
+</body>
+</html>

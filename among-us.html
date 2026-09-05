@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Among Us</title>
+  <link rel="stylesheet" href="./among-us.css">
+</head>
+<body>
+  <main id="among-us-app">
+    <section id="among-menu" class="screen">
+      <div class="menu-shell">
+        <a class="back-link" href="./index.html">← Dashboard</a>
+        <div class="brand-lockup">
+          <span class="brand-eyebrow">AI PLAYS</span>
+          <h1>AMONG US</h1>
+          <span class="brand-subtitle">SKELD // TEMPLATE BUILD</span>
+        </div>
+        <div class="menu-actions">
+          <button id="among-play" class="menu-action primary" type="button">PLAY<span>→</span></button>
+          <button id="among-settings" class="menu-action" type="button">SETTINGS<span>⚙</span></button>
+        </div>
+        <div class="menu-footnote">debugtest // CAFETERIA SPAWN</div>
+      </div>
+    </section>
+
+    <section id="among-settings-panel" class="panel screen hidden" aria-label="Among Us settings">
+      <div class="panel-shell">
+        <div class="panel-heading">
+          <button id="settings-back" class="text-button" type="button">← BACK</button>
+          <div>
+            <span class="brand-eyebrow">AMONG US</span>
+            <h2>SETTINGS</h2>
+          </div>
+          <span class="shared-badge">SHARED WITH MAFIA</span>
+        </div>
+
+        <div class="settings-scroll">
+          <section class="settings-section compact-settings">
+            <label class="setting-row">
+              <input id="setting-play-with-them" type="checkbox">
+              <span><strong>PLAY WITH THEM</strong><small>Join the match as a player. Placeholder until game logic is added.</small></span>
+            </label>
+            <label class="setting-row role-dependent hidden" id="role-setting-row">
+              <span><strong>CHOOSE YOUR ROLE</strong><small>Used when Play With Them is enabled.</small></span>
+              <select id="setting-user-role">
+                <option value="RANDOM">Random role</option>
+                <option value="CREWMATE">Crewmate</option>
+                <option value="IMPOSTOR">Impostor</option>
+              </select>
+            </label>
+            <label class="setting-row">
+              <input id="setting-disable-abstaining" type="checkbox">
+              <span><strong>DISABLE ABSTAINING</strong><small>Everyone must choose a vote target. Placeholder for the future match rules.</small></span>
+            </label>
+            <label class="setting-row">
+              <input id="setting-record" type="checkbox">
+              <span><strong>RECORD GAME</strong><small>Record the 2D Skeld match when recording support is added.</small></span>
+            </label>
+          </section>
+
+          <section class="settings-section">
+            <div class="section-label">AI PLAYERS <span>SHARED CONFIG</span></div>
+            <p class="section-note">Names, providers, models, keys, personalities, and Fish Audio settings are linked to Mafia Table in this browser.</p>
+            <div class="global-grid">
+              <label>Global Gemini API key<input id="global-gemini-key" type="password" placeholder="AIza..."></label>
+              <label>Global Gemini model<input id="global-gemini-model" type="text" placeholder="gemini-3.5-flash-lite"></label>
+              <label>Scheduler Gemini API key<input id="scheduler-gemini-key" type="password" placeholder="Blank = global key"></label>
+              <label>Scheduler Gemini model<input id="scheduler-gemini-model" type="text" placeholder="Blank = global model"></label>
+            </div>
+            <div id="ai-player-list" class="ai-player-list"></div>
+            <button id="add-ai-player" class="outline-button" type="button">+ ADD AI PLAYER</button>
+          </section>
+
+          <section class="settings-section fish-section">
+            <div class="section-label">FISH AUDIO <span>GLOBAL VOICE</span></div>
+            <div class="global-grid">
+              <label>Fish Audio API key<input id="fish-api-key" type="password" placeholder="Fish API key"></label>
+              <label>Voice / reference ID<input id="fish-voice-id" type="text" placeholder="Voice model ID"></label>
+              <label>Fish model<input id="fish-model" type="text" placeholder="s2.1-pro-free"></label>
+              <label>Voice status<select disabled><option>Template only</option></select></label>
+            </div>
+          </section>
+        </div>
+        <button id="settings-save" class="save-button" type="button">SAVE &amp; BACK</button>
+      </div>
+    </section>
+
+    <section id="loading-screen" class="screen hidden" aria-live="polite">
+      <div class="loading-card">
+        <div class="loading-mark">●</div>
+        <div class="loading-title">LOADING SKELD</div>
+        <div class="loading-status"><span id="loading-status-text">Preparing Cafeteria spawn</span><span id="loading-percent">0%</span></div>
+        <div class="loading-track"><div id="loading-fill"></div></div>
+        <div class="loading-detail">collision mask // hidden from players</div>
+      </div>
+    </section>
+
+    <section id="game-screen" class="hidden" aria-label="Among Us Skeld template">
+      <div id="map-viewport">
+        <div id="map-stage">
+          <img id="skeld-map" alt="The Skeld map">
+          <div id="map-fallback" aria-hidden="true">
+            <div class="fallback-cafeteria">CAFETERIA</div>
+            <div class="fallback-room security">SECURITY</div>
+            <div class="fallback-room reactor">REACTOR</div>
+            <div class="fallback-room navigation">NAVIGATION</div>
+            <div class="fallback-room electrical">ELECTRICAL</div>
+          </div>
+          <div id="debugtest-player" class="player-sprite" aria-label="debugtest">
+            <img id="player-frame" alt="debugtest">
+            <span>debugtest</span>
+          </div>
+          <div id="dummy1-player" class="player-sprite" aria-label="dummy1">
+            <img id="dummy1-frame" alt="dummy1">
+            <span>dummy1</span>
+          </div>
+        </div>
+      </div>
+      <div class="game-vignette"></div>
+      <div class="game-topbar">
+        <button id="game-exit" class="hud-button" type="button">EXIT</button>
+        <div class="game-title"><strong>AMONG US</strong><span>SKELD // TEMPLATE</span></div>
+        <button id="player-toggle" class="player-toggle" type="button" aria-label="Show players">:</button>
+      </div>
+      <button id="debug-role-button" class="debug-role-button" type="button">DEBUG ROLE</button>
+      <div id="player-roster" class="player-roster hidden">
+        <div class="roster-heading"><span>PLAYERS</span><small>2 LOADED</small></div>
+        <button id="debugtest-select" class="roster-player" type="button">
+          <span class="mini-crewmate"></span><span>debugtest</span><em>CAFETERIA</em>
+        </button>
+        <button id="dummy1-select" class="roster-player" type="button">
+          <span class="mini-crewmate blue-mini"></span><span>dummy1</span><em>REACTOR</em>
+        </button>
+      </div>
+      <div id="perspective-hud" class="perspective-hud hidden">
+        <span>POV</span><strong>debugtest</strong>
+      </div>
+      <div id="joystick" class="joystick" aria-label="Movement joystick">
+        <div class="joystick-ring"><div id="joystick-knob" class="joystick-knob"></div></div>
+      </div>
+      <div class="action-buttons">
+        <button class="round-action" type="button" aria-label="Use"><img src="./use_btn.png" alt="Use"></button>
+        <button id="report-action" class="round-action" type="button" aria-label="Report" disabled><img src="./report_btn.png" alt="Report"></button>
+        <button id="kill-action" class="round-action kill-action hidden" type="button" aria-label="Kill" disabled><img src="./kill_btn.png" alt="Kill"></button>
+      </div>
+      <div class="game-tip">WASD / ARROW KEYS TO MOVE · TAP : TO SWITCH POV</div>
+      <div id="debug-role-panel" class="debug-role-panel hidden" role="dialog" aria-label="Choose debug role">
+        <div class="debug-role-card">
+          <div class="debug-role-heading"><span>DEBUG ROLE</span><button id="debug-role-close" type="button" aria-label="Close">×</button></div>
+          <p>Set the role for the current POV.</p>
+          <div class="debug-role-options">
+            <button id="debug-crewmate" type="button">CREWMATE</button>
+            <button id="debug-impostor" type="button">IMPOSTOR</button>
+          </div>
+        </div>
+      </div>
+      <div id="report-overlay" class="report-overlay hidden" aria-live="polite"><img src="./report.png" alt="Body reported"></div>
+      <canvas id="collision-canvas" hidden></canvas>
+    </section>
+  </main>
+  <script type="module" src="./src/games/amongus/main.js"></script>
+</body>
+</html>
