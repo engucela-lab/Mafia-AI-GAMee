@@ -1,1071 +1,632 @@
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { createEnvironment, createPlayers, defaultProfiles } from './world.js';
-import { MafiaGame } from './games/mafia/game.js';
-import { UIController } from './ui.js';
-import { AudioController } from './audio.js';
-import { AchievementManager } from './achievements.js';
-import { DEFAULT_AI_MODEL, DEFAULT_FISH_MODEL, PROVIDER_DEFAULT_MODELS, speakWithFish } from './ai.js';
-
-const init = async () => {
-
-
-    const container = document.getElementById('game-container');
-
-    // Scene Setup
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x111111);
-    scene.fog = new THREE.FogExp2(0x111111, 0.02);
-
-    // Camera Setup
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 18, 24);
-    camera.lookAt(0, 0, 0);
-
-    // Renderer Setup
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    container.appendChild(renderer.domElement);
-
-    // Controls
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.maxPolarAngle = Math.PI / 2 - 0.1; 
-    controls.minDistance = 1;
-    controls.maxDistance = 50;
-
-    // Camera Focus System
-    const cameraLookTarget = new THREE.Vector3(0, 5.5, -10);
-
-    window.focusCameraOn = (player) => {
-        if (!player || !player.avatarGroup) return;
-        const worldPos = new THREE.Vector3();
-        player.avatarGroup.getWorldPosition(worldPos);
-        // Focus slightly above the head area for better framing
-        worldPos.y += 1.2; 
-        cameraLookTarget.copy(worldPos);
-    };
-
-    // Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 3.0); // Maximum brightness
-    scene.add(ambientLight);
-
-    const spotLight = new THREE.SpotLight(0xffeebb, 3000); // Even brighter spotlight
-    spotLight.position.set(0, 35, 0);
-    spotLight.angle = Math.PI / 4;
-    spotLight.penumbra = 0.5;
-    spotLight.decay = 2;
-    spotLight.distance = 100;
-    spotLight.castShadow = true;
-    spotLight.shadow.mapSize.width = 1024;
-    spotLight.shadow.mapSize.height = 1024;
-    scene.add(spotLight);
-
-
-
-    // Lightning Light
-    const lightningLight = new THREE.PointLight(0xaaddff, 0, 100);
-    lightningLight.position.set(0, 30, 0);
-    scene.add(lightningLight);
-
-    // Environment controls for Day/Night
-    const environment = {
-        setDay: () => {
-            // Animate transition
-            const startAmb = ambientLight.intensity;
-            const startSpot = spotLight.intensity;
-            const startTime = Date.now();
-            
-            const animateLight = () => {
-                const now = Date.now();
-                const progress = Math.min((now - startTime) / 1000, 1);
-                
-                ambientLight.intensity = startAmb + (3.0 - startAmb) * progress;
-                spotLight.intensity = startSpot + (3000 - startSpot) * progress;
-                spotLight.color.setHex(0xffeebb); // Warm sun
-                scene.background.setHex(0x111111); // Standard dark bg
-                scene.fog.color.setHex(0x111111);
-
-                if (progress < 1) requestAnimationFrame(animateLight);
-            };
-            animateLight();
-        },
-        setNight: () => {
-            const startAmb = ambientLight.intensity;
-            const startSpot = spotLight.intensity;
-            const startTime = Date.now();
-
-            const animateLight = () => {
-                const now = Date.now();
-                const progress = Math.min((now - startTime) / 1000, 1);
-                
-                ambientLight.intensity = startAmb + (0.1 - startAmb) * progress; // Very dim ambient
-                spotLight.intensity = startSpot + (200 - startSpot) * progress; // Dim spot
-                spotLight.color.setHex(0x445588); // Cool moonlight
-                scene.background.setHex(0x000000);
-                scene.fog.color.setHex(0x000000);
-
-                if (progress < 1) requestAnimationFrame(animateLight);
-            };
-            animateLight();
-        },
-        setStormy: () => {
-            const startAmb = ambientLight.intensity;
-            const startSpot = spotLight.intensity;
-            const startTime = Date.now();
-
-            const animateLight = () => {
-                const now = Date.now();
-                const progress = Math.min((now - startTime) / 1000, 1);
-                
-                // Darker than normal night for atmosphere
-                ambientLight.intensity = startAmb + (0.05 - startAmb) * progress; 
-                spotLight.intensity = startSpot + (100 - startSpot) * progress; 
-                spotLight.color.setHex(0x334466); // Cold blue grey
-                scene.background.setHex(0x050510);
-                scene.fog.color.setHex(0x050510);
-
-                if (progress < 1) requestAnimationFrame(animateLight);
-            };
-            animateLight();
-        },
-        triggerLightning: () => {
-            lightningLight.intensity = 5000;
-            scene.background.setHex(0x445566);
-            setTimeout(() => {
-                lightningLight.intensity = 1000;
-                scene.background.setHex(0x223344);
-                setTimeout(() => {
-                    lightningLight.intensity = 0;
-                    scene.background.setHex(0x050510);
-                }, 100);
-            }, 50);
-        }
-    };
-
-    // Populate World
-    const initialChairCount = Math.max(2, parseInt(localStorage.getItem('mafia_total_slots') || '15', 10) || 15);
-    createEnvironment(scene, initialChairCount);
-    let players = createPlayers(scene);
-
-    // Audio Setup
-    const audio = new AudioController();
-    // Start loading but don't block render
-    audio.load().then(() => {
-        console.log("Audio loaded");
-    });
-
-    // Global UI Sound Handlers
-    const getInteractiveElement = (target) => {
-        return target.closest('button, .menu-btn, .char-list-item, .action-btn, .setting-toggle, .role-toggle');
-    };
-
-    document.addEventListener('click', (e) => {
-        if (getInteractiveElement(e.target)) {
-            // Slight delay to ensure context is resumed if it was suspended
-            audio.playSFX('ui_click', 0.6, 0.1); 
-        }
-    });
-
-    let lastHovered = null;
-    document.addEventListener('mouseover', (e) => {
-        const el = getInteractiveElement(e.target);
-        // Ensure we only trigger when entering the element, not moving inside it
-        if (el && el !== lastHovered) {
-            audio.playSFX('ui_hover', 0.2); 
-            lastHovered = el;
-        } else if (!el) {
-            lastHovered = null;
-        }
-    });
-
-    // Achievement System
-    const achievements = new AchievementManager(audio);
-
-    // Game Logic
-    const ui = new UIController(audio); // Pass audio to UI
-    ui.onSpeak = (player, text) => speakWithFish(text, gameSettings);
-    const game = new MafiaGame(players, ui, environment, audio, achievements); // Pass audio to Game
-    
-    // Main Menu Logic
-    const dashboard = document.getElementById('game-dashboard');
-    const mainMenu = document.getElementById('main-menu');
-    const uiLayer = document.getElementById('ui-layer');
-    const btnOpenMafia = document.getElementById('btn-open-mafia');
-    const btnBackDashboard = document.getElementById('btn-back-dashboard');
-    const btnPlay = document.getElementById('btn-play');
-    const btnSettings = document.getElementById('btn-settings');
-    const btnCustomize = document.getElementById('btn-customize');
-    const btnAchievements = document.getElementById('btn-achievements');
-    const btnInfo = document.getElementById('btn-info');
-    const btnHowTo = document.getElementById('btn-how-to');
-    
-    const settingsModal = document.getElementById('settings-modal');
-    const infoModal = document.getElementById('info-modal');
-    const customizeModal = document.getElementById('customize-modal');
-    const achievementsModal = document.getElementById('achievements-modal');
-    const howToModal = document.getElementById('how-to-modal');
-    
-    const btnCloseSettings = document.getElementById('btn-close-settings');
-    const btnCloseHowTo = document.getElementById('btn-close-how-to');
-    const btnResetData = document.getElementById('btn-reset-data');
-    const btnExit = document.getElementById('btn-exit');
-
-    const versionText = document.getElementById('version-text');
-    const versionModal = document.getElementById('version-modal');
-    const btnCloseVersion = document.getElementById('btn-close-version');
-
-    versionText.addEventListener('click', () => {
-        versionModal.classList.remove('hidden');
-    });
-
-    btnCloseVersion.addEventListener('click', () => {
-        versionModal.classList.add('hidden');
-    });
-
-    const menuContent = mainMenu.querySelector('.menu-content');
-    const chaosSettingContainer = document.getElementById('chaos-setting-container');
-    const chaosCheckbox = document.getElementById('setting-chaos');
-    const roleSelectorContainer = document.getElementById('role-selector-container');
-    const roleSelect = document.getElementById('setting-user-role');
-    const playWithThemCheckbox = document.getElementById('setting-play-with-them');
-
-    const defaultRoleSettings = {
-        MAFIA: { weight: 24, max: 3, enabled: true },
-        SHERIFF: { weight: 12, max: 1, enabled: true },
-        HEALER: { weight: 12, max: 1, enabled: true },
-        CITIZEN: { weight: 46, max: 99, enabled: true },
-        VIGILANTE: { weight: 6, max: 1, enabled: true }
-    };
-
-    let savedSettings = {};
-    try {
-        savedSettings = JSON.parse(localStorage.getItem('mafia_ai_settings_v2') || '{}');
-    } catch (e) {
-        savedSettings = {};
-    }
-    if (!savedSettings || typeof savedSettings !== 'object' || Array.isArray(savedSettings)) savedSettings = {};
-    const storedSetting = (key, fallback = '') => savedSettings[key] ?? localStorage.getItem(key) ?? fallback;
-
-    const gameSettings = {
-        vigilanteBullets: 1,
-        survivorVests: 2,
-        playWithThem: false,
-        chaosMode: false,
-        ragdolls: false,
-        recordGame: false,
-        showTrollPanel: localStorage.getItem('mafia_show_troll_panel') !== 'false',
-        hideRoles: localStorage.getItem('mafia_hide_roles') === 'true',
-        disableAbstaining: false,
-        userRole: 'RANDOM',
-        muteMusic: localStorage.getItem('mafia_mute_music') === 'true',
-        roleSettings: defaultRoleSettings,
-        geminiApiKey: storedSetting('geminiApiKey', ''),
-        geminiModel: storedSetting('geminiModel', DEFAULT_AI_MODEL) || DEFAULT_AI_MODEL,
-        // Scheduler credentials are optional overrides. The scheduler itself
-        // falls back to the global Gemini credentials when these are blank.
-        schedulerApiKey: storedSetting('schedulerApiKey', ''),
-        schedulerModel: storedSetting('schedulerModel', ''),
-        fishApiKey: storedSetting('fishApiKey', ''),
-        fishVoiceId: storedSetting('fishVoiceId', ''),
-        fishModel: storedSetting('fishModel', DEFAULT_FISH_MODEL) || DEFAULT_FISH_MODEL,
-        fishEnabled: savedSettings.fishEnabled ?? localStorage.getItem('mafia_fish_enabled') === 'true',
-        aiPlayers: []
-    };
-
-    let savedAIPlayers = {};
-    try {
-        savedAIPlayers = savedSettings.aiPlayers
-            ?? JSON.parse(localStorage.getItem('mafia_ai_players') || 'null')
-            ?? {};
-    } catch (e) {
-        savedAIPlayers = savedSettings.aiPlayers || {};
-    }
-    if (!Array.isArray(savedAIPlayers) && (!savedAIPlayers || typeof savedAIPlayers !== 'object')) savedAIPlayers = {};
-    gameSettings.aiPlayers = Array.from({ length: initialChairCount }, (_, index) => {
-        const savedPlayer = savedAIPlayers[index] || {};
-        const provider = savedPlayer.provider || 'gemini';
-        const savedModel = String(savedPlayer.model || '').trim();
-        // Repair older saves where every provider inherited Gemini's model.
-        const model = savedModel && !(provider !== 'gemini' && savedModel === DEFAULT_AI_MODEL)
-            ? savedModel
-            : PROVIDER_DEFAULT_MODELS[provider] || DEFAULT_AI_MODEL;
-        return {
-            name: savedPlayer.name || savedModel || defaultProfiles[index]?.name || `Player ${index + 1}`,
-            provider,
-            endpoint: savedPlayer.endpoint || '',
-            model,
-            apiKey: savedPlayer.apiKey || '',
-            personality: savedPlayer.personality || defaultProfiles[index]?.personality || 'Observant and strategic.',
-            img: savedPlayer.img || defaultProfiles[index]?.img || 'avatar_texture.png'
-        };
-    });
-    players.forEach((player, index) => { player.aiConfig = gameSettings.aiPlayers[index]; });
-
-    // Apply initial mute setting
-    if (gameSettings.muteMusic) {
-        audio.setMusicMuted(true);
-        document.getElementById('setting-mute-music').checked = true;
-    }
-
-    // Toggle role selector visibility based on play with them
-    playWithThemCheckbox.addEventListener('change', (e) => {
-        if (e.target.checked) {
-            roleSelectorContainer.classList.remove('hidden');
-        } else {
-            roleSelectorContainer.classList.add('hidden');
-        }
-    });
-
-    // Camera animation for menu background
-    let isMenuOpen = true;
-
-    const openMafiaMenu = () => {
-        dashboard.classList.add('hidden');
-        mainMenu.style.display = 'flex';
-        mainMenu.style.pointerEvents = 'auto';
-        requestAnimationFrame(() => mainMenu.classList.remove('hidden'));
-    };
-
-    const openDashboard = () => {
-        mainMenu.classList.add('hidden');
-        mainMenu.style.pointerEvents = 'none';
-        menuContent.style.display = 'flex';
-        dashboard.classList.remove('hidden');
-    };
-
-    btnOpenMafia.addEventListener('click', openMafiaMenu);
-    btnBackDashboard.addEventListener('click', openDashboard);
-
-    btnPlay.addEventListener('click', (e) => {
-        e.stopPropagation(); // Prevent generic click sound
-        if (audio) audio.playSFX('ui_start', 1.0); // Special start sound
-        
-        // Disable interactions immediately
-        mainMenu.style.pointerEvents = 'none';
-        isMenuOpen = false;
-
-        // Handle "Play With Them" - Setup Human Player
-        if (gameSettings.playWithThem) {
-            const humanIndex = 0; // Replace the first player
-            const humanPlayer = players[humanIndex];
-            
-            // Update Data
-            humanPlayer.name = "You";
-            humanPlayer.isHuman = true;
-            humanPlayer.img = 'logo_user.png';
-            
-            // Update Visuals (Texture Swap)
-            const textureLoader = new THREE.TextureLoader();
-            const userTex = textureLoader.load('logo_user.png');
-            userTex.colorSpace = THREE.SRGBColorSpace;
-
-            // Find Sprite in Avatar Group
-            const sprite = humanPlayer.avatarGroup.children[0];
-            sprite.material.map = userTex;
-            
-            humanPlayer.avatarGroup.children[1].visible = false; // Hide label for self
-        }
-
-        // Pass settings to game
-        game.settings = gameSettings;
-
-        mainMenu.classList.add('hidden');
-        uiLayer.classList.remove('hidden');
-        ui.setTrollPanelVisible(gameSettings.showTrollPanel);
-        ui.areRolesRevealed = !gameSettings.hideRoles; // Sync player list visibility with mystery mode
-        
-        // Explicitly remove from display after transition
-        setTimeout(() => {
-            if (!isMenuOpen) mainMenu.style.display = 'none';
-        }, 600);
-        
-        // Reset camera to the middle of the table
-        const targetPos = new THREE.Vector3(0, 6.5, 0.5); // Center of table, slightly offset for better perspective
-        const startPos = camera.position.clone();
-        const startTime = Date.now();
-        
-        controls.enabled = false; // Disable orbit controls during gameplay for cinematic feel
-
-        const animateCam = () => {
-            const now = Date.now();
-            const progress = Math.min((now - startTime) / 1000, 1);
-            const ease = 1 - Math.pow(1 - progress, 3);
-            
-            camera.position.lerpVectors(startPos, targetPos, ease);
-            
-            if (progress < 1) requestAnimationFrame(animateCam);
-        };
-        animateCam();
-
-        // Show the priority/pause HUD before the asynchronous match begins.
-        // Waiting until game.start() resolves would make it appear only after
-        // the entire match had ended.
-        const human = players.find(p => p.isHuman);
-        ui.setPriorityHUD(true, human ? human.id : 0);
-        game.start().catch(error => console.error('Game start failed:', error));
-    });
-
-    const renderAIPlayers = () => {
-        const container = document.getElementById('ai-player-list');
-        if (!container) return;
-        container.innerHTML = '';
-        gameSettings.aiPlayers.forEach((player, index) => {
-            const card = document.createElement('div');
-            card.className = 'ai-player-card';
-            card.innerHTML = `
-                <div class="ai-card-header"><span>AI PLAYER ${index + 1}</span>${gameSettings.aiPlayers.length > 2 ? `<button type="button" class="ai-remove" data-index="${index}">REMOVE</button>` : ''}</div>
-                <div class="ai-player-grid">
-                    <label>Name<input data-field="name" data-index="${index}" value="${escapeHtml(player.name)}" maxlength="24"></label>
-                    <label>Provider<select data-field="provider" data-index="${index}">
-                        <option value="gemini">Gemini</option>
-                        <option value="openai">OpenAI</option>
-                        <option value="anthropic">Anthropic</option>
-                        <option value="deepseek">DeepSeek</option>
-                        <option value="openrouter">OpenRouter</option>
-                        <option value="custom">Custom</option>
-                    </select></label>
-                    <label class="ai-custom-url" data-index="${index}">Custom URL (only for Custom)<input data-field="endpoint" data-index="${index}" value="${escapeHtml(player.endpoint || '')}" placeholder="https://.../chat/completions"></label>
-                    <label>Model<input list="ai-model-presets" data-field="model" data-index="${index}" value="${escapeHtml(player.model || PROVIDER_DEFAULT_MODELS[player.provider] || DEFAULT_AI_MODEL)}" placeholder="Preset or custom model"></label>
-                    <label>Player API key<input data-field="apiKey" data-index="${index}" type="password" value="${escapeHtml(player.apiKey || '')}" placeholder="Selected provider key"></label>
-                    <label>Logo PNG filename<input data-field="img" data-index="${index}" value="${escapeHtml(player.img || '')}" placeholder="logo_gemini.png"></label>
-                    <label class="ai-personality">Personality<textarea data-field="personality" data-index="${index}" rows="2" placeholder="Calm, suspicious, dramatic...">${escapeHtml(player.personality || '')}</textarea></label>
-                </div>`;
-            container.appendChild(card);
-            const provider = card.querySelector('[data-field="provider"]');
-            provider.value = player.provider || 'gemini';
-            const customUrl = card.querySelector('.ai-custom-url');
-            customUrl.classList.toggle('hidden', provider.value !== 'custom');
-            provider.addEventListener('change', () => {
-                if (provider.value !== 'custom') card.querySelector('[data-field="endpoint"]').value = '';
-                const modelInput = card.querySelector('[data-field="model"]');
-                const builtInModels = Object.values(PROVIDER_DEFAULT_MODELS);
-                if (builtInModels.includes(modelInput.value.trim())) {
-                    modelInput.value = PROVIDER_DEFAULT_MODELS[provider.value] || DEFAULT_AI_MODEL;
-                }
-                customUrl.classList.toggle('hidden', provider.value !== 'custom');
-                gameSettings.aiPlayers = captureAIPlayers();
-                persistAISettings();
-            });
-            card.querySelectorAll('[data-field]').forEach(field => {
-                field.addEventListener('input', () => {
-                    gameSettings.aiPlayers = captureAIPlayers();
-                    persistAISettings();
-                });
-            });
-        });
-        container.querySelectorAll('.ai-remove').forEach(button => {
-            button.addEventListener('click', () => {
-                gameSettings.aiPlayers = captureAIPlayers();
-                gameSettings.aiPlayers.splice(Number(button.dataset.index), 1);
-                persistAISettings();
-                renderAIPlayers();
-            });
-        });
-    };
-
-    const escapeHtml = (value) => String(value || '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
-
-    const captureAIPlayers = () => Array.from(document.querySelectorAll('.ai-player-card')).map((card, index) => {
-        const read = field => card.querySelector(`[data-field="${field}"]`)?.value.trim() || '';
-        return {
-            name: read('name') || read('model') || `Player ${index + 1}`,
-            provider: read('provider') || 'gemini',
-            endpoint: read('endpoint'),
-            model: read('model') || PROVIDER_DEFAULT_MODELS[read('provider') || 'gemini'] || DEFAULT_AI_MODEL,
-            apiKey: read('apiKey'),
-            personality: read('personality') || defaultProfiles[index]?.personality || 'Observant and strategic.',
-            img: read('img') || defaultProfiles[index]?.img || 'avatar_texture.png'
-        };
-    });
-
-    const persistAISettings = () => {
-        const payload = {
-            geminiApiKey: gameSettings.geminiApiKey,
-            geminiModel: gameSettings.geminiModel,
-            schedulerApiKey: gameSettings.schedulerApiKey,
-            schedulerModel: gameSettings.schedulerModel,
-            fishApiKey: gameSettings.fishApiKey,
-            fishVoiceId: gameSettings.fishVoiceId,
-            fishModel: gameSettings.fishModel,
-            fishEnabled: gameSettings.fishEnabled,
-            aiPlayers: gameSettings.aiPlayers
-        };
-        localStorage.setItem('mafia_ai_settings_v2', JSON.stringify(payload));
-        localStorage.setItem('mafia_gemini_api_key', gameSettings.geminiApiKey);
-        localStorage.setItem('mafia_gemini_model', gameSettings.geminiModel);
-        localStorage.setItem('mafia_fish_api_key', gameSettings.fishApiKey);
-        localStorage.setItem('mafia_fish_voice_id', gameSettings.fishVoiceId);
-        localStorage.setItem('mafia_fish_model', gameSettings.fishModel);
-        localStorage.setItem('mafia_fish_enabled', String(gameSettings.fishEnabled));
-        localStorage.setItem('mafia_ai_players', JSON.stringify(gameSettings.aiPlayers));
-        localStorage.setItem('mafia_total_slots', String(gameSettings.aiPlayers.length));
-    };
-
-    const syncPlayersToSettings = () => {
-        players.forEach(player => scene.remove(player.chairGroup));
-        players = createPlayers(scene);
-        players.forEach((player, index) => { player.aiConfig = gameSettings.aiPlayers[index]; });
-        game.players = players;
-        ui.renderPlayerList(players);
-    };
-
-    btnSettings.addEventListener('click', () => {
-        menuContent.style.display = 'none';
-        settingsModal.classList.remove('hidden');
-        document.getElementById('setting-show-troll-panel').checked = gameSettings.showTrollPanel;
-        document.getElementById('setting-hide-roles').checked = gameSettings.hideRoles;
-        renderAIPlayers();
-        document.getElementById('setting-gemini-key').value = gameSettings.geminiApiKey;
-        document.getElementById('setting-gemini-model').value = gameSettings.geminiModel;
-        document.getElementById('setting-scheduler-key').value = gameSettings.schedulerApiKey;
-        document.getElementById('setting-scheduler-model').value = gameSettings.schedulerModel;
-        document.getElementById('setting-fish-key').value = gameSettings.fishApiKey;
-        document.getElementById('setting-fish-voice').value = gameSettings.fishVoiceId;
-        document.getElementById('setting-fish-model').value = gameSettings.fishModel;
-    });
-
-    const syncGlobalAISettings = () => {
-        gameSettings.geminiApiKey = document.getElementById('setting-gemini-key').value.trim();
-        gameSettings.geminiModel = document.getElementById('setting-gemini-model').value.trim() || DEFAULT_AI_MODEL;
-        gameSettings.schedulerApiKey = document.getElementById('setting-scheduler-key').value.trim();
-        gameSettings.schedulerModel = document.getElementById('setting-scheduler-model').value.trim();
-        gameSettings.fishApiKey = document.getElementById('setting-fish-key').value.trim();
-        gameSettings.fishVoiceId = document.getElementById('setting-fish-voice').value.trim();
-        gameSettings.fishModel = document.getElementById('setting-fish-model').value.trim() || DEFAULT_FISH_MODEL;
-        gameSettings.fishEnabled = Boolean(gameSettings.fishApiKey && gameSettings.fishVoiceId);
-        persistAISettings();
-    };
-
-    ['setting-gemini-key', 'setting-gemini-model', 'setting-scheduler-key', 'setting-scheduler-model', 'setting-fish-key', 'setting-fish-voice', 'setting-fish-model']
-        .forEach(id => document.getElementById(id).addEventListener('input', syncGlobalAISettings));
-
-    document.getElementById('btn-add-ai-player').addEventListener('click', () => {
-        gameSettings.aiPlayers = captureAIPlayers();
-        const index = gameSettings.aiPlayers.length;
-        gameSettings.aiPlayers.push({
-            name: `Player ${index + 1}`,
-            provider: 'gemini',
-            endpoint: '',
-            model: DEFAULT_AI_MODEL,
-            apiKey: '',
-            personality: defaultProfiles[index]?.personality || 'Observant and strategic.',
-            img: defaultProfiles[index]?.img || 'avatar_texture.png'
-        });
-        persistAISettings();
-        renderAIPlayers();
-    });
-
-    const muteMusicCheckbox = document.getElementById('setting-mute-music');
-    muteMusicCheckbox.addEventListener('change', (e) => {
-        gameSettings.muteMusic = e.target.checked;
-        audio.setMusicMuted(gameSettings.muteMusic);
-        localStorage.setItem('mafia_mute_music', gameSettings.muteMusic);
-    });
-
-    btnCloseSettings.addEventListener('click', () => {
-        gameSettings.playWithThem = document.getElementById('setting-play-with-them').checked;
-        gameSettings.chaosMode = document.getElementById('setting-chaos').checked;
-        gameSettings.ragdolls = document.getElementById('setting-ragdolls').checked;
-        gameSettings.recordGame = document.getElementById('setting-record').checked;
-        gameSettings.showTrollPanel = document.getElementById('setting-show-troll-panel').checked;
-        localStorage.setItem('mafia_show_troll_panel', gameSettings.showTrollPanel);
-        gameSettings.hideRoles = document.getElementById('setting-hide-roles').checked;
-        localStorage.setItem('mafia_hide_roles', gameSettings.hideRoles);
-        gameSettings.disableAbstaining = document.getElementById('setting-disable-abstaining').checked;
-        gameSettings.userRole = document.getElementById('setting-user-role').value;
-        gameSettings.muteMusic = muteMusicCheckbox.checked;
-
-        gameSettings.vigilanteBullets = 1;
-        syncGlobalAISettings();
-
-        gameSettings.aiPlayers = captureAIPlayers();
-        persistAISettings();
-
-        syncPlayersToSettings();
-        
-        settingsModal.classList.add('hidden');
-        menuContent.style.display = 'flex';
-    });
-
-    if (btnResetData) {
-        btnResetData.addEventListener('click', () => {
-            if(confirm('Reset all saved game data?')) {
-                localStorage.removeItem(BP_STORAGE_KEY);
-                window.location.reload();
-            }
-        });
-    }
-
-
-
-    // Achievements UI Handlers
-    if (btnAchievements) {
-        btnAchievements.addEventListener('click', () => {
-            menuContent.style.display = 'none';
-            achievementsModal.classList.remove('hidden');
-            achievements.renderModalList(document.getElementById('achievements-list'));
-        });
-    }
-
-    const btnCloseAchievements = document.getElementById('btn-close-achievements');
-    if (btnCloseAchievements) {
-        btnCloseAchievements.addEventListener('click', () => {
-            achievementsModal.classList.add('hidden');
-            menuContent.style.display = 'flex';
-        });
-    }
-
-    const roleData = [
-        { name: "Villager", team: "good", desc: "A town member whose vote is their greatest power." },
-        { name: "Sheriff", team: "good", desc: "Investigate one player each night to learn whether they look suspicious." },
-        { name: "Doctor", team: "good", desc: "Protect one player each night from the Mafia's attack." },
-        { name: "Mafia", team: "evil", desc: "Choose a victim each night and survive long enough to outnumber the town." },
-        { name: "Vigilante", team: "good", desc: "An innocent town role with one shot. You can use it or skip the kill." }
-    ];
-
-    if (btnInfo) {
-        btnInfo.addEventListener('click', () => {
-            menuContent.style.display = 'none';
-            infoModal.classList.remove('hidden');
-            const list = document.getElementById('role-info-list');
-            list.innerHTML = '';
-            roleData.forEach(role => {
-                const item = document.createElement('div');
-                item.className = `info-item team-${role.team}`;
-                item.innerHTML = `
-                    <div class="ach-info">
-                        <div class="info-team-tag team-${role.team}">${role.team} team</div>
-                        <div class="ach-title">${role.name}</div>
-                        <div class="ach-desc">${role.desc}</div>
-                    </div>
-                `;
-                list.appendChild(item);
-            });
-        });
-    }
-
-    const btnCloseInfo = document.getElementById('btn-close-info');
-    if (btnCloseInfo) {
-        btnCloseInfo.addEventListener('click', () => {
-            infoModal.classList.add('hidden');
-            menuContent.style.display = 'flex';
-        });
-    }
-
-    if (btnHowTo) {
-        btnHowTo.addEventListener('click', () => {
-            menuContent.style.display = 'none';
-            howToModal.classList.remove('hidden');
-        });
-    }
-
-    if (btnCloseHowTo) {
-        btnCloseHowTo.addEventListener('click', () => {
-            howToModal.classList.add('hidden');
-            menuContent.style.display = 'flex';
-        });
-    }
-
-    // Welcome Message Logic
-    const welcomeOverlay = document.getElementById('welcome-message-overlay');
-    const btnCloseWelcome = document.getElementById('btn-close-welcome');
-
-    if (welcomeOverlay && btnCloseWelcome) {
-        // Show welcome message
-        welcomeOverlay.classList.remove('hidden');
-
-        btnCloseWelcome.addEventListener('click', () => {
-             if (audio) audio.playSFX('ui_click', 1.0);
-             welcomeOverlay.classList.add('hidden');
-        });
-    }
-
-    // Customization Logic
-    let currentEditingSlot = -1;
-    let tempCustomData = {};
-    let tempTotalSlots = parseInt(localStorage.getItem('mafia_total_slots') || '15');
-    const fileInput = document.getElementById('cust-file');
-    const previewImg = document.getElementById('cust-preview-img');
-
-    // Canvas Label Helper (Duplicated from World to ensure availability for dynamic updates)
-    const createLabelTexture = (text, colorStr, showBox = true, fontSize = 80) => {
-        const canvas = document.createElement('canvas');
-        canvas.width = 512;
-        canvas.height = 256;
-        const ctx = canvas.getContext('2d');
-        
-        if (showBox) {
-            ctx.fillStyle = 'rgba(0,0,0,0.6)';
-            ctx.fillRect(0, 0, 512, 256);
-            
-            ctx.strokeStyle = colorStr;
-            ctx.lineWidth = 10;
-            ctx.strokeRect(5, 5, 502, 246);
-        } else {
-            ctx.clearRect(0, 0, 512, 256);
-        }
-
-        ctx.fillStyle = colorStr;
-        ctx.font = `bold ${fontSize}px Roboto, Arial, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(text, 256, 128);
-
-        const tex = new THREE.CanvasTexture(canvas);
-        tex.colorSpace = THREE.SRGBColorSpace;
-        return tex;
-    };
-
-    const loadCustomizationUI = () => {
-        const list = document.getElementById('customize-char-list');
-        list.innerHTML = '';
-        
-        // Load current data from LS to temp, if not already loaded
-        if (Object.keys(tempCustomData).length === 0) {
-            try {
-                tempCustomData = JSON.parse(localStorage.getItem('mafia_custom_profiles') || '{}');
-            } catch(e) { tempCustomData = {}; }
-        }
-
-        const defaults = defaultProfiles;
-        const totalSlots = tempTotalSlots;
-
-        // Create List Items
-        for(let i=0; i<totalSlots; i++) {
-            const item = document.createElement('div');
-            item.className = 'char-list-item';
-            
-            // Container for name
-            const nameSpan = document.createElement('span');
-            let name = `Slot ${i+1}`;
-            
-            // Priority: Temp User Data -> Default Profiles -> Generic Slot Name
-            if (tempCustomData[i] && tempCustomData[i].name) {
-                name = tempCustomData[i].name + " *";
-            } else if (i < defaults.length) {
-                name = defaults[i].name;
-            }
-            
-            nameSpan.textContent = name;
-            item.appendChild(nameSpan);
-
-            // Add Delete Button (allow deleting any slot unless it's the last 2 players)
-            if (totalSlots > 2) {
-                const delBtn = document.createElement('button');
-                delBtn.innerHTML = '🗑️';
-                delBtn.className = 'char-del-btn';
-                delBtn.style.marginLeft = 'auto';
-                delBtn.style.background = 'transparent';
-                delBtn.style.border = 'none';
-                delBtn.style.cursor = 'pointer';
-                delBtn.style.fontSize = '1.2rem';
-                
-                delBtn.onclick = (e) => {
-                    e.stopPropagation(); 
-                    deleteSlot(i);
-                };
-                item.appendChild(delBtn);
-            }
-
-            item.onclick = () => selectSlot(i, item);
-            list.appendChild(item);
-        }
-        
-        // Add "Add Slot" Button
-        const addBtn = document.createElement('div');
-        addBtn.className = 'char-list-item';
-        addBtn.style.textAlign = 'center';
-        addBtn.style.color = '#4488ff';
-        addBtn.style.fontWeight = 'bold';
-        addBtn.textContent = '+ ADD CHARACTER';
-        addBtn.onclick = addNewSlot;
-        list.appendChild(addBtn);
-
-        // Select first slot by default if none selected or invalid
-        if (currentEditingSlot === -1 || currentEditingSlot >= totalSlots) {
-             selectSlot(0, list.children[0]);
-        }
-    };
-
-    const addNewSlot = () => {
-        tempTotalSlots++;
-        loadCustomizationUI();
-        // Scroll to bottom
-        const list = document.getElementById('customize-char-list');
-        list.scrollTop = list.scrollHeight;
-        // Select new slot
-        const newIndex = tempTotalSlots - 1;
-        selectSlot(newIndex, list.children[newIndex]);
-    };
-
-    const deleteSlot = (index) => {
-        if (!confirm("Remove this character?")) return;
-
-        // Shift data
-        const maxIndex = tempTotalSlots - 1;
-        for (let i = index; i < maxIndex; i++) {
-            if (tempCustomData[i+1]) {
-                tempCustomData[i] = tempCustomData[i+1];
-            } else {
-                delete tempCustomData[i];
-            }
-        }
-        delete tempCustomData[maxIndex]; 
-        
-        tempTotalSlots--;
-        if (currentEditingSlot >= index) currentEditingSlot = -1; 
-        loadCustomizationUI();
-    };
-
-    const selectSlot = (index, element) => {
-        currentEditingSlot = index;
-        
-        // Highlight
-        document.querySelectorAll('.char-list-item').forEach(el => el.classList.remove('active'));
-        if (element) element.classList.add('active');
-        else {
-             // Fallback find if element not passed directly (reloads)
-             const items = document.querySelectorAll('.char-list-item');
-             if(items[index]) items[index].classList.add('active');
-        }
-
-        // Populate fields
-        const defaults = defaultProfiles;
-        let data = tempCustomData[index] || (index < defaults.length ? defaults[index] : {
-            name: `Slot ${index+1}`,
-            img: 'avatar_texture.png',
-            personality: 'A new challenger.'
-        });
-
-        document.getElementById('cust-name').value = data.name || '';
-        document.getElementById('cust-personality').value = data.personality || '';
-        previewImg.src = data.img || 'avatar_texture.png';
-        
-        // Setup Role Select
-        const roleSelect = document.getElementById('cust-role');
-
-        // Rebuild options to handle conditional roles
-        roleSelect.innerHTML = `<option value="">Random</option>`;
-        
-        // Add roles that are enabled in the distribution settings
-        Object.entries(gameSettings.roleSettings).forEach(([roleKey, cfg]) => {
-            if (cfg.enabled) {
-                // Formatting for display: e.g., EVIL_REVIVER -> Evil Reviver
-                const label = ({ CITIZEN: 'Villager', HEALER: 'Doctor', MAFIA: 'Mafia', SHERIFF: 'Sheriff', VIGILANTE: 'Vigilante' })[roleKey] || roleKey;
-                roleSelect.innerHTML += `<option value="${roleKey}">${label}</option>`;
-            }
-        });
-
-        roleSelect.value = data.forcedRole || '';
-
-        // Reset file input
-        fileInput.value = '';
-    };
-
-    // File Input Handler
-    fileInput.addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = (evt) => {
-                previewImg.src = evt.target.result;
-            };
-            reader.readAsDataURL(file);
-        }
-    });
-
-    const saveCurrentSlot = () => {
-        if(currentEditingSlot === -1) return;
-        
-        const name = document.getElementById('cust-name').value;
-        const personality = document.getElementById('cust-personality').value;
-        const role = document.getElementById('cust-role').value;
-        const img = previewImg.src; // Get from preview (either loaded from file or existing)
-        
-        // Save to temp
-        tempCustomData[currentEditingSlot] = {
-            name, img, personality,
-            forcedRole: role,
-            // Preserve color or generate random if new
-            colorStr: tempCustomData[currentEditingSlot]?.colorStr || (defaultProfiles[currentEditingSlot]?.text) || '#'+Math.floor(Math.random()*16777215).toString(16)
-        };
-
-        if (Object.keys(tempCustomData).length >= 3) {
-            achievements.unlock('artistic_being');
-        }
-        
-        // Update list text
-        loadCustomizationUI(); // Re-render to update names with *
-        
-        const btn = document.getElementById('btn-save-char');
-        const originalText = btn.textContent;
-        btn.textContent = "APPLIED!";
-        btn.style.background = "#22aa22";
-        btn.style.borderColor = "#22aa22";
-        setTimeout(() => {
-            btn.textContent = originalText;
-            btn.style.background = "";
-            btn.style.borderColor = "";
-        }, 1000);
-    };
-
-    if (btnCustomize) {
-        btnCustomize.addEventListener('click', () => {
-            menuContent.style.display = 'none';
-            customizeModal.classList.remove('hidden');
-            loadCustomizationUI();
-        });
-    }
-
-    document.getElementById('btn-save-char').addEventListener('click', saveCurrentSlot);
-
-    const btnRandomizeBot = document.getElementById('btn-randomize-bot');
-    if (btnRandomizeBot) {
-        btnRandomizeBot.addEventListener('click', async () => {
-            const randomNames = ["Sigma", "Nebula", "Xenon", "Cipher", "Aegis", "Pulse", "Zenith", "Glitch", "Echo", "Flux", "Nova", "Atlas", "Vortex", "Catalyst", "Onyx", "Rogue", "Mirage", "Specter", "Oracle", "Sentry", "Borealis", "Helix", "Quark", "Ion", "Synapse"];
-            const randomPers = [
-                "Analytical and cold.", "Bubbly and suspicious.", "Logical but prone to fits of rage.",
-                "Silent and observant.", "Always tries to redirect suspicion.", "Highly aggressive and confrontational.",
-                "Speaks in riddles and metaphors.", "Very apologetic but sneaky.", "Confident and charismatic.",
-                "Nervous and easily startled.", "Sarcastic and pessimistic.", "Friendly and helpful, but hiding something.",
-                "Paranoid about everyone.", "Quiet but watches everyone's moves.", "Determined to find the Mafia.",
-                "Constantly quotes famous philosophers.", "Uses too much internet slang.", "Deeply existential and confused.",
-                "Believes they are the protagonist of a movie.", "Extremely competitive and takes everything personally.",
-                "Speaks in the third person.", "Has a strange obsession with ducks."
-            ];
-            
-            const nameInput = document.getElementById('cust-name');
-            const persInput = document.getElementById('cust-personality');
-            const previewImg = document.getElementById('cust-preview-img');
-            
-            const chosenName = randomNames[Math.floor(Math.random() * randomNames.length)];
-            const chosenPers = randomPers[Math.floor(Math.random() * randomPers.length)];
-            
-            nameInput.value = chosenName;
-            persInput.value = chosenPers;
-            
-            if (audio) audio.playSFX('ui_buy', 0.8);
-            
-            // UI Feedback for randomizing
-            btnRandomizeBot.disabled = true;
-            btnRandomizeBot.textContent = "⌛ GENERATING...";
-            btnRandomizeBot.style.opacity = "0.6";
-            
-            const fallback = defaultProfiles[Math.floor(Math.random() * defaultProfiles.length)].img;
-            previewImg.src = fallback;
-            btnRandomizeBot.disabled = false;
-            btnRandomizeBot.textContent = "🎲 RANDOMIZE";
-            btnRandomizeBot.style.opacity = "1";
-        });
-    }
-
-    document.getElementById('btn-close-customize').addEventListener('click', () => {
-        // Commit to LS
-        localStorage.setItem('mafia_custom_profiles', JSON.stringify(tempCustomData));
-        localStorage.setItem('mafia_total_slots', tempTotalSlots.toString());
-        
-        // Rebuild Players logic if count changed or data updated
-        // Always rebuilding is safer to ensure consistency
-        
-        // 1. Remove existing chairs
-        if (players) {
-            players.forEach(p => {
-                scene.remove(p.chairGroup);
-            });
-        }
-        
-        // 2. Recreate Players
-        players = createPlayers(scene);
-        
-        // 3. Update references
-        game.players = players;
-        ui.renderPlayerList(players);
-
-        // Close Modal
-        customizeModal.classList.add('hidden');
-        menuContent.style.display = 'flex';
-    });
-
-    document.getElementById('btn-reset-customize').addEventListener('click', () => {
-        if(confirm("Reset all custom characters to default?")) {
-            localStorage.removeItem('mafia_custom_profiles');
-            localStorage.removeItem('mafia_total_slots');
-            window.location.reload();
-        }
-    });
-
-    // Exit Handler
-    btnExit.addEventListener('click', () => {
-        if (confirm("Exit to Main Menu?")) {
-            // Stop Logic
-            game.stop();
-            ui.cancelInputs();
-            
-            // Clean up UI
-            uiLayer.classList.add('hidden');
-            mainMenu.style.display = 'flex';
-            mainMenu.style.pointerEvents = 'auto';
-            
-            // Allow display to register before removing hidden class for transition
-            setTimeout(() => {
-                mainMenu.classList.remove('hidden');
-            }, 10);
-            
-            menuContent.style.display = 'flex';
-            isMenuOpen = true;
-
-            // Reset Game Logic State
-            game.reset();
-            ui.setTrollPanelVisible(false);
-            
-            // Reset Environment (Lights)
-            environment.setDay(); // Default to Day/Init lighting
-
-            // Reset UI lists
-            ui.renderPlayerList(players); // Reset list UI
-            
-            // Restore Camera
-            // We set isMenuOpen=true, so the animation loop will take over camera control again
-        }
-    });
-
-    // Resize Handler
-    window.addEventListener('resize', () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-    });
-
-    // Animation Loop
-    const animate = () => {
-        requestAnimationFrame(animate);
-        
-        if (isMenuOpen) {
-            // Slow rotation around the room for the menu background
-            const time = Date.now() * 0.0001;
-            camera.position.x = Math.cos(time) * 35;
-            camera.position.z = Math.sin(time) * 35;
-            camera.position.y = 20;
-            camera.lookAt(0, 0, 0);
-        } else {
-            // Smoothly rotate camera to face speaker, victim, or event
-            controls.target.lerp(cameraLookTarget, 0.08);
-            controls.update();
-        }
-        
-
-
-        renderer.render(scene, camera);
-
-        // Update bubble positions after render ensures matrices are up-to-date
-        ui.updateBubblePositions(camera, window.innerWidth, window.innerHeight);
-    };
-
-    animate();
+const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
+const DEFAULT_FISH_MODEL = 's2.1-pro-free';
+const PLAYER_DEFAULTS = [
+  ['Gemini', 'gemini'], ['ChatGPT', 'openai'], ['Claude', 'anthropic'], ['Grok', 'openrouter'],
+  ['Perplexity', 'gemini'], ['Firefly', 'gemini'], ['Copilot', 'openai'], ['DeepSeek', 'deepseek'],
+  ['Siri', 'gemini'], ['Player 10', 'gemini']
+];
+const PROVIDER_MODELS = {
+  gemini: DEFAULT_MODEL,
+  openai: 'gpt-4o-mini',
+  anthropic: 'claude-3-5-haiku-latest',
+  deepseek: 'deepseek-chat',
+  openrouter: 'openai/gpt-4o-mini',
+  custom: DEFAULT_MODEL
 };
 
-init();
+const byId = id => document.getElementById(id);
+const readJson = (key, fallback) => {
+  try {
+    const value = JSON.parse(localStorage.getItem(key) || '');
+    return value && typeof value === 'object' ? value : fallback;
+  } catch { return fallback; }
+};
+const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+
+const makePlayer = (index, source = {}) => {
+  const [defaultName, defaultProvider] = PLAYER_DEFAULTS[index] || [`Player ${index + 1}`, 'gemini'];
+  const provider = source.provider || defaultProvider;
+  return {
+    name: source.name || defaultName,
+    provider,
+    endpoint: source.endpoint || '',
+    model: source.model || PROVIDER_MODELS[provider] || DEFAULT_MODEL,
+    apiKey: source.apiKey || '',
+    personality: source.personality || 'Observant and strategic.',
+    img: source.img || 'avatar_texture.png'
+  };
+};
+
+const loadSharedConfig = () => {
+  const saved = readJson('mafia_ai_settings_v2', {});
+  let players = Array.isArray(saved.aiPlayers) ? saved.aiPlayers : readJson('mafia_ai_players', []);
+  if (!Array.isArray(players)) players = [];
+  const savedCount = Number(localStorage.getItem('mafia_total_slots')) || 0;
+  const count = Math.max(players.length, savedCount, players.length ? 1 : 10);
+  players = Array.from({ length: count }, (_, index) => makePlayer(index, players[index] || {}));
+  return {
+    geminiApiKey: saved.geminiApiKey || localStorage.getItem('mafia_gemini_api_key') || '',
+    geminiModel: saved.geminiModel || localStorage.getItem('mafia_gemini_model') || DEFAULT_MODEL,
+    schedulerApiKey: saved.schedulerApiKey || '',
+    schedulerModel: saved.schedulerModel || '',
+    fishApiKey: saved.fishApiKey || localStorage.getItem('mafia_fish_api_key') || '',
+    fishVoiceId: saved.fishVoiceId || localStorage.getItem('mafia_fish_voice_id') || '',
+    fishModel: saved.fishModel || localStorage.getItem('mafia_fish_model') || DEFAULT_FISH_MODEL,
+    aiPlayers: players
+  };
+};
+
+const persistSharedConfig = shared => {
+  const current = readJson('mafia_ai_settings_v2', {});
+  const payload = {
+    ...current,
+    geminiApiKey: shared.geminiApiKey,
+    geminiModel: shared.geminiModel,
+    schedulerApiKey: shared.schedulerApiKey,
+    schedulerModel: shared.schedulerModel,
+    fishApiKey: shared.fishApiKey,
+    fishVoiceId: shared.fishVoiceId,
+    fishModel: shared.fishModel,
+    fishEnabled: Boolean(shared.fishApiKey && shared.fishVoiceId),
+    aiPlayers: shared.aiPlayers
+  };
+  localStorage.setItem('mafia_ai_settings_v2', JSON.stringify(payload));
+  localStorage.setItem('mafia_ai_players', JSON.stringify(shared.aiPlayers));
+  localStorage.setItem('mafia_total_slots', String(shared.aiPlayers.length));
+  localStorage.setItem('mafia_gemini_api_key', shared.geminiApiKey);
+  localStorage.setItem('mafia_gemini_model', shared.geminiModel);
+  localStorage.setItem('mafia_fish_api_key', shared.fishApiKey);
+  localStorage.setItem('mafia_fish_voice_id', shared.fishVoiceId);
+  localStorage.setItem('mafia_fish_model', shared.fishModel);
+};
+
+const storedGameSettings = readJson('among_us_settings_v1', {});
+const gameSettings = {
+  playWithThem: Boolean(storedGameSettings.playWithThem),
+  disableAbstaining: Boolean(storedGameSettings.disableAbstaining),
+  recordGame: Boolean(storedGameSettings.recordGame),
+  userRole: storedGameSettings.userRole || 'RANDOM'
+};
+const shared = loadSharedConfig();
+
+const saveGameSettings = () => localStorage.setItem('among_us_settings_v1', JSON.stringify({
+  playWithThem: gameSettings.playWithThem,
+  disableAbstaining: gameSettings.disableAbstaining,
+  recordGame: gameSettings.recordGame,
+  userRole: gameSettings.userRole
+}));
+
+const amongMenu = byId('among-menu');
+const settingsPanel = byId('among-settings-panel');
+const loadingScreen = byId('loading-screen');
+const gameScreen = byId('game-screen');
+
+const openSettings = () => {
+  amongMenu.classList.add('hidden');
+  settingsPanel.classList.remove('hidden');
+  renderSettings();
+};
+const closeSettings = () => {
+  settingsPanel.classList.add('hidden');
+  amongMenu.classList.remove('hidden');
+};
+byId('among-settings').addEventListener('click', openSettings);
+byId('settings-back').addEventListener('click', closeSettings);
+
+const capturePlayerCards = () => Array.from(document.querySelectorAll('.ai-card')).map((card, index) => {
+  const read = field => card.querySelector(`[data-field="${field}"]`)?.value.trim() || '';
+  const provider = read('provider') || 'gemini';
+  return makePlayer(index, {
+    name: read('name'), provider, endpoint: read('endpoint'), model: read('model') || PROVIDER_MODELS[provider],
+    apiKey: read('apiKey'), personality: read('personality'), img: read('img')
+  });
+});
+
+const syncSharedFromForm = () => {
+  shared.geminiApiKey = byId('global-gemini-key').value.trim();
+  shared.geminiModel = byId('global-gemini-model').value.trim() || DEFAULT_MODEL;
+  shared.schedulerApiKey = byId('scheduler-gemini-key').value.trim();
+  shared.schedulerModel = byId('scheduler-gemini-model').value.trim();
+  shared.fishApiKey = byId('fish-api-key').value.trim();
+  shared.fishVoiceId = byId('fish-voice-id').value.trim();
+  shared.fishModel = byId('fish-model').value.trim() || DEFAULT_FISH_MODEL;
+  shared.aiPlayers = capturePlayerCards();
+  persistSharedConfig(shared);
+};
+
+const renderPlayers = () => {
+  const list = byId('ai-player-list');
+  list.innerHTML = '';
+  shared.aiPlayers.forEach((player, index) => {
+    const card = document.createElement('article');
+    card.className = 'ai-card';
+    card.innerHTML = `<div class="ai-card-heading"><span>AI PLAYER ${index + 1}</span>${shared.aiPlayers.length > 1 ? `<button class="remove-ai" type="button" data-remove="${index}">REMOVE</button>` : ''}</div>
+      <div class="ai-card-grid">
+        <label>Name<input data-field="name" value="${escapeHtml(player.name)}" maxlength="24"></label>
+        <label>Provider<select data-field="provider"><option value="gemini">Gemini</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="deepseek">DeepSeek</option><option value="openrouter">OpenRouter</option><option value="custom">Custom</option></select></label>
+        <label>Model<input data-field="model" value="${escapeHtml(player.model)}"></label>
+        <label>Player API key<input data-field="apiKey" type="password" value="${escapeHtml(player.apiKey)}" placeholder="Provider key"></label>
+        <label>Logo PNG filename<input data-field="img" value="${escapeHtml(player.img)}" placeholder="avatar_texture.png"></label>
+        <label>Custom endpoint<input data-field="endpoint" value="${escapeHtml(player.endpoint)}" placeholder="Only for Custom"></label>
+        <label class="wide">Personality<textarea data-field="personality" rows="2" placeholder="Calm, suspicious, dramatic...">${escapeHtml(player.personality)}</textarea></label>
+      </div>`;
+    list.appendChild(card);
+    card.querySelector('[data-field="provider"]').value = player.provider;
+    card.querySelectorAll('[data-field]').forEach(input => input.addEventListener('input', () => {
+      shared.aiPlayers = capturePlayerCards();
+      persistSharedConfig(shared);
+    }));
+  });
+  list.querySelectorAll('[data-remove]').forEach(button => button.addEventListener('click', () => {
+    shared.aiPlayers.splice(Number(button.dataset.remove), 1);
+    shared.aiPlayers = shared.aiPlayers.map((player, index) => makePlayer(index, player));
+    persistSharedConfig(shared);
+    renderPlayers();
+  }));
+};
+
+const renderSettings = () => {
+  byId('setting-play-with-them').checked = Boolean(gameSettings.playWithThem);
+  byId('setting-disable-abstaining').checked = Boolean(gameSettings.disableAbstaining);
+  byId('setting-record').checked = Boolean(gameSettings.recordGame);
+  byId('setting-user-role').value = gameSettings.userRole || 'RANDOM';
+  byId('role-setting-row').classList.toggle('hidden', !gameSettings.playWithThem);
+  byId('global-gemini-key').value = shared.geminiApiKey;
+  byId('global-gemini-model').value = shared.geminiModel;
+  byId('scheduler-gemini-key').value = shared.schedulerApiKey;
+  byId('scheduler-gemini-model').value = shared.schedulerModel;
+  byId('fish-api-key').value = shared.fishApiKey;
+  byId('fish-voice-id').value = shared.fishVoiceId;
+  byId('fish-model').value = shared.fishModel;
+  renderPlayers();
+};
+
+['global-gemini-key', 'global-gemini-model', 'scheduler-gemini-key', 'scheduler-gemini-model', 'fish-api-key', 'fish-voice-id', 'fish-model']
+  .forEach(id => byId(id).addEventListener('input', syncSharedFromForm));
+byId('setting-play-with-them').addEventListener('change', event => {
+  gameSettings.playWithThem = event.target.checked;
+  byId('role-setting-row').classList.toggle('hidden', !gameSettings.playWithThem);
+  saveGameSettings();
+});
+byId('setting-disable-abstaining').addEventListener('change', event => { gameSettings.disableAbstaining = event.target.checked; saveGameSettings(); });
+byId('setting-record').addEventListener('change', event => { gameSettings.recordGame = event.target.checked; saveGameSettings(); });
+byId('setting-user-role').addEventListener('change', event => { gameSettings.userRole = event.target.value; saveGameSettings(); });
+byId('add-ai-player').addEventListener('click', () => {
+  shared.aiPlayers = capturePlayerCards();
+  shared.aiPlayers.push(makePlayer(shared.aiPlayers.length));
+  persistSharedConfig(shared);
+  renderPlayers();
+});
+byId('settings-save').addEventListener('click', () => { syncSharedFromForm(); saveGameSettings(); closeSettings(); });
+
+const assetExists = async path => {
+  try { const response = await fetch(`./${path}`, { method: 'HEAD', cache: 'no-store' }); return response.ok; } catch { return false; }
+};
+const loadImage = src => new Promise((resolve, reject) => {
+  const image = new Image();
+  image.onload = () => resolve(image);
+  image.onerror = reject;
+  image.src = src;
+});
+
+const createFallbackFrame = (step = 0) => {
+  const canvas = document.createElement('canvas'); canvas.width = 167; canvas.height = 231;
+  const ctx = canvas.getContext('2d');
+  const bob = step % 2 ? 5 : 0;
+  ctx.fillStyle = '#7a0b22'; ctx.beginPath(); ctx.ellipse(83, 130 + bob, 57, 69, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#f31e31'; ctx.beginPath(); ctx.roundRect(31, 44 + bob, 99, 108, 36); ctx.fill();
+  ctx.fillStyle = '#bde9ff'; ctx.beginPath(); ctx.ellipse(89, 78 + bob, 34, 22, -.1, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#6aa9d0'; ctx.beginPath(); ctx.ellipse(98, 73 + bob, 21, 12, -.1, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#f31e31'; ctx.beginPath(); ctx.roundRect(22, 145 + bob, 45, 39, 17); ctx.fill(); ctx.beginPath(); ctx.roundRect(100, 147 + bob, 45, 37, 17); ctx.fill();
+  return canvas.toDataURL();
+};
+
+const prepareFrames = async () => {
+  const frameNames = ['walk1.png', 'walk2.png', 'walk3.png', 'walk4.png'];
+  const available = await Promise.all(frameNames.map(assetExists));
+  const sources = available.every(Boolean)
+    ? await Promise.all(frameNames.map(name => loadImage(`./${name}`)))
+    : frameNames.map((_, index) => null);
+
+  const makeWalkSet = async (color, idlePath) => {
+    const idle = await assetExists(idlePath) ? `./${idlePath}` : createFallbackFrame(0);
+    if (!available.every(Boolean)) return { idle, walk: frameNames.map((_, index) => createFallbackFrame(index)) };
+    const target = await loadImage(`./${idlePath}`).catch(() => null);
+    if (!target) return { idle, walk: sources.map(image => image.src) };
+    // These coordinates are deliberately read from the original 150x198
+    // idle-color PNG. They are the palette anchors for the two colored
+    // regions in every supplied walk frame.
+    const paletteCanvas = document.createElement('canvas'); paletteCanvas.width = target.width; paletteCanvas.height = target.height;
+    const paletteContext = paletteCanvas.getContext('2d'); paletteContext.drawImage(target, 0, 0);
+    const palette = paletteContext.getImageData(0, 0, target.width, target.height).data;
+    const sample = (x, y) => [palette[(y * target.width + x) * 4], palette[(y * target.width + x) * 4 + 1], palette[(y * target.width + x) * 4 + 2]];
+    const redReplacement = sample(87, 103);
+    const blueReplacement = sample(60, 145);
+    const walk = sources.map(source => {
+      const canvas = document.createElement('canvas'); canvas.width = source.width; canvas.height = source.height;
+      const context = canvas.getContext('2d'); context.drawImage(source, 0, 0);
+      const imageData = context.getImageData(0, 0, canvas.width, canvas.height); const pixels = imageData.data;
+      for (let i = 0; i < pixels.length; i += 4) {
+        if (pixels[i + 3] === 0) continue;
+        const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
+        const isRed = r > 150 && g < 85 && b < 100;
+        const isBlue = b > 135 && b > r * 1.35 && b > g * 1.25;
+        if (isRed || isBlue) {
+          const replacement = isRed ? redReplacement : blueReplacement;
+          const brightness = (r + g + b) / 765;
+          pixels[i] = Math.min(255, replacement[0] * (.55 + brightness));
+          pixels[i + 1] = Math.min(255, replacement[1] * (.55 + brightness));
+          pixels[i + 2] = Math.min(255, replacement[2] * (.55 + brightness));
+        }
+      }
+      context.putImageData(imageData, 0, 0); return canvas.toDataURL();
+    });
+    return { color, idle, walk };
+  };
+
+  const makeDeadFallback = async idlePath => {
+    const source = await loadImage('./blue_dead.png').catch(() => null);
+    const target = await loadImage(`./${idlePath}`).catch(() => null);
+    if (!source || !target) return target ? `./${idlePath}` : createFallbackFrame(0);
+    const canvas = document.createElement('canvas'); canvas.width = source.width; canvas.height = source.height;
+    const context = canvas.getContext('2d'); context.drawImage(source, 0, 0);
+    const targetCanvas = document.createElement('canvas'); targetCanvas.width = target.width; targetCanvas.height = target.height;
+    const targetContext = targetCanvas.getContext('2d'); targetContext.drawImage(target, 0, 0);
+    const palette = targetContext.getImageData(0, 0, target.width, target.height).data;
+    const sample = (x, y) => [palette[(y * target.width + x) * 4], palette[(y * target.width + x) * 4 + 1], palette[(y * target.width + x) * 4 + 2]];
+    const body = sample(87, 103); const shadow = sample(60, 145);
+    const imageData = context.getImageData(0, 0, canvas.width, canvas.height); const pixels = imageData.data;
+    for (let i = 0; i < pixels.length; i += 4) {
+      const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
+      const isBlueBody = b > r * 1.35 && b > g * 1.25 && (b > 100 || (b > 20 && r < 30 && g < 40));
+      if (pixels[i + 3] && isBlueBody) {
+        const replacement = b < 80 ? shadow : body;
+        const brightness = (r + g + b) / 765;
+        pixels[i] = Math.min(255, replacement[0] * (.55 + brightness));
+        pixels[i + 1] = Math.min(255, replacement[1] * (.55 + brightness));
+        pixels[i + 2] = Math.min(255, replacement[2] * (.55 + brightness));
+      }
+    }
+    context.putImageData(imageData, 0, 0); return canvas.toDataURL();
+  };
+  const redDead = await assetExists('red_dead.png') ? './red_dead.png' : await makeDeadFallback('red.png');
+  const blueDead = await assetExists('blue_dead.png') ? './blue_dead.png' : await makeDeadFallback('blue.png');
+  return {
+    red: { ...(await makeWalkSet('red', 'red.png')), dead: redDead },
+    blue: { ...(await makeWalkSet('blue', 'blue.png')), dead: blueDead }
+  };
+};
+
+const collision = { canvas: byId('collision-canvas'), context: null, ready: false, ratio: .25, grid: null, gridWidth: 0, gridHeight: 0, pathStep: 32 };
+const loadCollision = async () => {
+  if (!(await assetExists('skeld_collison.png'))) return;
+  const image = await loadImage('./skeld_collison.png');
+  collision.canvas.width = Math.floor(image.width * collision.ratio);
+  collision.canvas.height = Math.floor(image.height * collision.ratio);
+  collision.context = collision.canvas.getContext('2d', { willReadFrequently: true });
+  collision.context.drawImage(image, 0, 0, collision.canvas.width, collision.canvas.height);
+  collision.ready = true;
+  buildPathGrid();
+};
+const isWalkable = (x, y) => {
+  if (x < 180 || y < 150 || x > 8450 || y > 4720) return false;
+  if (!collision.ready) return true;
+  const px = Math.max(0, Math.min(collision.canvas.width - 1, Math.round(x * collision.ratio)));
+  const py = Math.max(0, Math.min(collision.canvas.height - 1, Math.round(y * collision.ratio)));
+  const pixel = collision.context.getImageData(px, py, 1, 1).data;
+  return pixel[0] > 180 && pixel[1] > 180 && pixel[2] > 180;
+};
+
+const buildPathGrid = () => {
+  if (!collision.ready) return;
+  const step = collision.pathStep;
+  const width = Math.ceil(8636 / step); const height = Math.ceil(5000 / step);
+  const data = collision.context.getImageData(0, 0, collision.canvas.width, collision.canvas.height).data;
+  const grid = new Uint8Array(width * height);
+  for (let gy = 0; gy < height; gy++) {
+    for (let gx = 0; gx < width; gx++) {
+      const x = Math.min(8635, (gx + .5) * step);
+      const y = Math.min(4999, (gy + .5) * step);
+      const px = Math.max(0, Math.min(collision.canvas.width - 1, Math.round(x * collision.ratio)));
+      const py = Math.max(0, Math.min(collision.canvas.height - 1, Math.round(y * collision.ratio)));
+      const offset = (py * collision.canvas.width + px) * 4;
+      grid[gy * width + gx] = data[offset] > 180 && data[offset + 1] > 180 && data[offset + 2] > 180 ? 1 : 0;
+    }
+  }
+  collision.grid = grid; collision.gridWidth = width; collision.gridHeight = height;
+};
+
+const players = {
+  debugtest: { id: 'debugtest', name: 'debugtest', color: 'red', x: 4380, y: 1200, direction: 1, moving: false, alive: true, role: 'CREWMATE', random: true, frameIndex: 0, lastFrameAt: 0, currentFrameSrc: '' },
+  dummy1: { id: 'dummy1', name: 'dummy1', color: 'blue', x: 1250, y: 2300, direction: 1, moving: false, alive: true, role: 'CREWMATE', random: true, frameIndex: 0, lastFrameAt: 0, currentFrameSrc: '' }
+};
+const mapStage = byId('map-stage');
+const viewport = byId('map-viewport');
+const elements = {
+  debugtest: { root: byId('debugtest-player'), frame: byId('player-frame') },
+  dummy1: { root: byId('dummy1-player'), frame: byId('dummy1-frame') }
+};
+const rolePanel = byId('debug-role-panel');
+const killAction = byId('kill-action');
+const reportAction = byId('report-action');
+const reportOverlay = byId('report-overlay');
+let controlledPlayerId = 'debugtest';
+let frameSets = null;
+let scale = .42; let raf = 0; let reportTimer = 0;
+const keys = new Set();
+const joystickVector = { x: 0, y: 0 };
+const randomState = { debugtest: { x: 0, y: 0, until: 0 }, dummy1: { x: 0, y: 0, until: 0 } };
+const chasePaths = { debugtest: null, dummy1: null };
+
+const controlledPlayer = () => players[controlledPlayerId];
+const distanceBetween = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const getNearbyPlayer = (source, includeDead = false) => Object.values(players)
+  .filter(candidate => candidate.id !== source.id && (includeDead ? true : candidate.alive))
+  .sort((a, b) => distanceBetween(source, a) - distanceBetween(source, b))[0];
+const getNearbyBody = source => Object.values(players)
+  .filter(candidate => candidate.id !== source.id && !candidate.alive)
+  .sort((a, b) => distanceBetween(source, a) - distanceBetween(source, b))[0];
+
+const gridIndexFor = (x, y) => {
+  const gx = Math.max(0, Math.min(collision.gridWidth - 1, Math.floor(x / collision.pathStep)));
+  const gy = Math.max(0, Math.min(collision.gridHeight - 1, Math.floor(y / collision.pathStep)));
+  return { gx, gy, index: gy * collision.gridWidth + gx };
+};
+
+const nearestWalkableCell = (x, y) => {
+  if (!collision.grid) return null;
+  const origin = gridIndexFor(x, y);
+  if (collision.grid[origin.index]) return origin;
+  for (let radius = 1; radius <= 8; radius++) {
+    for (let gy = origin.gy - radius; gy <= origin.gy + radius; gy++) {
+      for (let gx = origin.gx - radius; gx <= origin.gx + radius; gx++) {
+        if (gx < 0 || gy < 0 || gx >= collision.gridWidth || gy >= collision.gridHeight) continue;
+        const index = gy * collision.gridWidth + gx;
+        if (collision.grid[index]) return { gx, gy, index };
+      }
+    }
+  }
+  return null;
+};
+
+const findPath = (from, to) => {
+  if (!collision.grid) return [];
+  const start = nearestWalkableCell(from.x, from.y); const goal = nearestWalkableCell(to.x, to.y);
+  if (!start || !goal) return [];
+  const total = collision.grid.length; const previous = new Int32Array(total); previous.fill(-2);
+  const queue = new Int32Array(total); let head = 0; let tail = 0;
+  previous[start.index] = -1; queue[tail++] = start.index;
+  const neighbors = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  while (head < tail && previous[goal.index] === -2) {
+    const current = queue[head++]; const gx = current % collision.gridWidth; const gy = Math.floor(current / collision.gridWidth);
+    for (const [dx, dy] of neighbors) {
+      const nx = gx + dx; const ny = gy + dy;
+      if (nx < 0 || ny < 0 || nx >= collision.gridWidth || ny >= collision.gridHeight) continue;
+      const next = ny * collision.gridWidth + nx;
+      if (!collision.grid[next] || previous[next] !== -2) continue;
+      previous[next] = current; queue[tail++] = next;
+    }
+  }
+  if (previous[goal.index] === -2) return [];
+  const points = [];
+  for (let current = goal.index; current !== start.index; current = previous[current]) {
+    const gx = current % collision.gridWidth; const gy = Math.floor(current / collision.gridWidth);
+    points.push({ x: (gx + .5) * collision.pathStep, y: (gy + .5) * collision.pathStep });
+  }
+  return points.reverse();
+};
+
+const updateCamera = () => {
+  const current = controlledPlayer();
+  const centerX = viewport.clientWidth / 2; const centerY = viewport.clientHeight / 2;
+  mapStage.style.transform = `translate(${centerX - current.x * scale}px, ${centerY - current.y * scale}px) scale(${scale})`;
+};
+
+const updatePlayerVisual = (player, timestamp = 0) => {
+  const element = elements[player.id]; if (!element) return;
+  const frame = element.frame; const root = element.root;
+  root.style.left = `${player.x}px`; root.style.top = `${player.y}px`;
+  root.classList.toggle('player-dead', !player.alive);
+  root.classList.toggle('player-walking', player.alive && player.moving);
+  root.querySelector('span').style.color = player.role === 'IMPOSTOR' ? '#ff525c' : '#fff';
+  root.querySelector('span').textContent = player.name;
+  frame.style.transform = `scaleX(${player.direction})`;
+  if (!player.alive) {
+    const deadPath = frameSets?.[player.color]?.dead || frameSets?.[player.color]?.idle;
+    if (player.currentFrameSrc !== deadPath) { frame.src = deadPath; player.currentFrameSrc = deadPath; }
+    return;
+  }
+  const set = frameSets?.[player.color]; if (!set) return;
+  if (player.moving && timestamp - player.lastFrameAt > 125) {
+    player.frameIndex = (player.frameIndex + 1) % set.walk.length;
+    player.lastFrameAt = timestamp;
+    frame.src = set.walk[player.frameIndex]; player.currentFrameSrc = frame.src;
+  }
+  if (!player.moving && player.currentFrameSrc !== set.idle) {
+    player.frameIndex = 0; frame.src = set.idle; player.currentFrameSrc = set.idle;
+  }
+};
+
+const updateActionButtons = () => {
+  const current = controlledPlayer();
+  const nearby = getNearbyPlayer(current);
+  const canKill = current.alive && current.role === 'IMPOSTOR' && nearby && distanceBetween(current, nearby) <= 220;
+  killAction.classList.toggle('hidden', !(current.alive && current.role === 'IMPOSTOR'));
+  killAction.disabled = !canKill;
+  const nearbyBody = getNearbyBody(current);
+  reportAction.disabled = !nearbyBody || nearbyBody.alive || distanceBetween(current, nearbyBody) > 240;
+};
+
+const updatePerspectiveHud = () => {
+  const current = controlledPlayer();
+  const hud = byId('perspective-hud');
+  hud.querySelector('strong').textContent = current.name;
+  hud.style.borderLeftColor = current.role === 'IMPOSTOR' ? '#f34d57' : (current.color === 'blue' ? '#67c7ff' : '#f34d57');
+  byId('debug-role-button').textContent = `DEBUG ROLE · ${current.role}`;
+};
+
+const refreshRoster = () => {
+  Object.values(players).forEach(player => {
+    const button = byId(`${player.id}-select`); if (!button) return;
+    button.classList.toggle('selected', player.id === controlledPlayerId);
+    button.querySelector('span:nth-child(2)').style.color = player.role === 'IMPOSTOR' ? '#ff525c' : '#fff';
+    button.querySelector('em').textContent = !player.alive ? 'DEAD' : (player.id === 'dummy1' ? 'REACTOR' : 'CAFETERIA');
+  });
+};
+
+const refreshGameUi = timestamp => {
+  Object.values(players).forEach(player => updatePlayerVisual(player, timestamp));
+  updateCamera(); updatePerspectiveHud(); refreshRoster(); updateActionButtons();
+};
+
+const chooseRandomDirection = (player, timestamp) => {
+  const state = randomState[player.id];
+  if (timestamp < state.until) return;
+  const angle = Math.random() * Math.PI * 2;
+  state.x = Math.cos(angle); state.y = Math.sin(angle); state.until = timestamp + 600 + Math.random() * 1700;
+};
+
+const movePlayer = (player, dx, dy, speed) => {
+  const length = Math.hypot(dx, dy);
+  if (!length) { player.moving = false; return; }
+  dx /= length; dy /= length; player.moving = true;
+  const desiredAngle = Math.atan2(dy, dx);
+  const steeringAngles = [0, .34, -.34, .68, -.68, 1.15, -1.15, 1.57, -1.57, 2.2, -2.2, Math.PI];
+  const moved = steeringAngles.some(offset => {
+    const angle = desiredAngle + offset; const steerX = Math.cos(angle); const steerY = Math.sin(angle);
+    const nextX = player.x + steerX * speed; const nextY = player.y + steerY * speed;
+    if (!isWalkable(nextX, player.y) && !isWalkable(player.x, nextY)) return false;
+    if (Math.abs(steerX) > .08) player.direction = steerX < 0 ? -1 : 1;
+    if (isWalkable(nextX, player.y)) player.x = nextX;
+    if (isWalkable(player.x, nextY)) player.y = nextY;
+    return true;
+  });
+  if (!moved) { player.moving = false; randomState[player.id].until = 0; }
+};
+
+const movePlayerAlongPath = (player, dx, dy, speed) => {
+  const length = Math.hypot(dx, dy);
+  if (!length) { player.moving = false; return; }
+  dx /= length; dy /= length;
+  if (Math.abs(dx) > .08) player.direction = dx < 0 ? -1 : 1;
+  const nextX = player.x + dx * speed; const nextY = player.y + dy * speed;
+  if (isWalkable(nextX, nextY)) {
+    player.x = nextX; player.y = nextY; player.moving = true;
+  } else if (isWalkable(nextX, player.y)) {
+    player.x = nextX; player.moving = true;
+  } else if (isWalkable(player.x, nextY)) {
+    player.y = nextY; player.moving = true;
+  } else {
+    player.moving = false;
+  }
+};
+
+const getChaseVector = (player, target, timestamp) => {
+  const cached = chasePaths[player.id];
+  const needsNewPath = !cached || timestamp - cached.updatedAt > 450
+    || Math.hypot(target.x - cached.targetX, target.y - cached.targetY) > 110
+    || cached.index >= cached.points.length;
+  if (needsNewPath) {
+    chasePaths[player.id] = {
+      points: findPath(player, target), index: 0,
+      targetX: target.x, targetY: target.y, updatedAt: timestamp
+    };
+  }
+  const path = chasePaths[player.id];
+  while (path.index < path.points.length && Math.hypot(player.x - path.points[path.index].x, player.y - path.points[path.index].y) < 22) path.index++;
+  const waypoint = path.points[path.index];
+  if (waypoint) return { x: waypoint.x - player.x, y: waypoint.y - player.y };
+  return { x: target.x - player.x, y: target.y - player.y };
+};
+
+const killPlayer = (killer, target) => {
+  if (!killer || !target || !killer.alive || !target.alive || killer.role !== 'IMPOSTOR') return false;
+  if (distanceBetween(killer, target) > 240) return false;
+  target.alive = false; target.moving = false; target.frameIndex = 0; target.currentFrameSrc = '';
+  if (target.id === controlledPlayerId) controlledPlayerId = killer.id;
+  refreshGameUi();
+  return true;
+};
+
+const movementLoop = timestamp => {
+  const current = controlledPlayer();
+  const keyX = (keys.has('ArrowRight') || keys.has('d') ? 1 : 0) - (keys.has('ArrowLeft') || keys.has('a') ? 1 : 0);
+  const keyY = (keys.has('ArrowDown') || keys.has('s') ? 1 : 0) - (keys.has('ArrowUp') || keys.has('w') ? 1 : 0);
+  let dx = keyX + joystickVector.x; let dy = keyY + joystickVector.y;
+  movePlayer(current, dx, dy, 285 / 60);
+
+  Object.values(players).filter(player => player.id !== controlledPlayerId && player.alive).forEach(player => {
+    let randomX; let randomY;
+    if (player.role === 'IMPOSTOR' && current.alive) {
+      const chase = getChaseVector(player, current, timestamp);
+      movePlayerAlongPath(player, chase.x, chase.y, 190 / 60);
+    } else {
+      chooseRandomDirection(player, timestamp); randomX = randomState[player.id].x; randomY = randomState[player.id].y;
+      movePlayer(player, randomX, randomY, 190 / 60);
+    }
+    if (player.role === 'IMPOSTOR' && current.alive && distanceBetween(player, current) <= 175) killPlayer(player, current);
+  });
+  refreshGameUi(timestamp);
+  raf = requestAnimationFrame(movementLoop);
+};
+
+const setupJoystick = () => {
+  const base = byId('joystick'); const knob = byId('joystick-knob'); let pointerId = null;
+  const reset = () => { pointerId = null; joystickVector.x = 0; joystickVector.y = 0; knob.style.transform = 'translate(0, 0)'; };
+  const move = event => {
+    if (event.pointerId !== pointerId) return;
+    const rect = base.getBoundingClientRect(); const radius = rect.width * .38;
+    const center = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    let x = event.clientX - center.x; let y = event.clientY - center.y; const distance = Math.hypot(x, y);
+    if (distance > radius) { x = x / distance * radius; y = y / distance * radius; }
+    joystickVector.x = x / radius; joystickVector.y = y / radius; knob.style.transform = `translate(${x}px, ${y}px)`;
+  };
+  base.addEventListener('pointerdown', event => { pointerId = event.pointerId; base.setPointerCapture(pointerId); move(event); });
+  base.addEventListener('pointermove', move); base.addEventListener('pointerup', reset); base.addEventListener('pointercancel', reset); base.addEventListener('lostpointercapture', reset);
+};
+
+const showPerspective = () => { gameScreen.classList.add('perspective-active'); byId('perspective-hud').classList.remove('hidden'); byId('player-roster').classList.add('hidden'); refreshGameUi(); };
+const selectPerspective = id => { if (!players[id]) return; controlledPlayerId = id; showPerspective(); };
+const resetPlayers = () => {
+  Object.assign(players.debugtest, { x: 4380, y: 1200, direction: 1, moving: false, alive: true, role: 'CREWMATE', frameIndex: 0, lastFrameAt: 0, currentFrameSrc: '' });
+  Object.assign(players.dummy1, { x: 1250, y: 2300, direction: 1, moving: false, alive: true, role: 'CREWMATE', frameIndex: 0, lastFrameAt: 0, currentFrameSrc: '' });
+  controlledPlayerId = 'debugtest';
+  randomState.debugtest.until = 0; randomState.dummy1.until = 0;
+  chasePaths.debugtest = null; chasePaths.dummy1 = null;
+};
+const startGame = async () => {
+  resetPlayers();
+  amongMenu.classList.add('hidden'); loadingScreen.classList.remove('hidden');
+  const status = byId('loading-status-text'); const percent = byId('loading-percent'); const fill = byId('loading-fill');
+  const phases = [['Preparing Cafeteria + Reactor spawn', 22], ['Loading Skeld map', 52], ['Reading collision mask', 76], ['Waking dummy1', 100]];
+  const mapReadyPromise = assetExists('skeld_map.png');
+  const [mapReady, frameSet] = await Promise.all([mapReadyPromise, prepareFrames(), loadCollision()]).then(values => [values[0], values[1]]);
+  frameSets = frameSet;
+  if (mapReady) { byId('skeld-map').src = './skeld_map.png'; byId('map-fallback').style.display = 'none'; }
+  else { byId('map-fallback').style.display = 'block'; }
+  for (const [label, value] of phases) { status.textContent = label; percent.textContent = `${value}%`; fill.style.width = `${value}%`; await new Promise(resolve => setTimeout(resolve, 170)); }
+  loadingScreen.classList.add('hidden'); gameScreen.classList.remove('hidden');
+  scale = Math.max(.3, Math.min(.52, Math.min(innerWidth / 760, innerHeight / 630)));
+  updateCamera(); setupJoystick(); refreshGameUi();
+  cancelAnimationFrame(raf); raf = requestAnimationFrame(movementLoop);
+};
+
+byId('among-play').addEventListener('click', startGame);
+byId('player-toggle').addEventListener('click', () => byId('player-roster').classList.toggle('hidden'));
+byId('debugtest-select').addEventListener('click', () => selectPerspective('debugtest'));
+byId('dummy1-select').addEventListener('click', () => selectPerspective('dummy1'));
+byId('debug-role-button').addEventListener('click', () => rolePanel.classList.remove('hidden'));
+byId('debug-role-close').addEventListener('click', () => rolePanel.classList.add('hidden'));
+const setCurrentRole = role => { controlledPlayer().role = role; rolePanel.classList.add('hidden'); refreshGameUi(); };
+byId('debug-crewmate').addEventListener('click', () => setCurrentRole('CREWMATE'));
+byId('debug-impostor').addEventListener('click', () => setCurrentRole('IMPOSTOR'));
+killAction.addEventListener('click', () => { const target = getNearbyPlayer(controlledPlayer()); if (target && killPlayer(controlledPlayer(), target)) refreshGameUi(); });
+reportAction.addEventListener('click', () => {
+  if (reportAction.disabled) return;
+  reportOverlay.classList.remove('hidden'); clearTimeout(reportTimer);
+  reportTimer = setTimeout(() => reportOverlay.classList.add('hidden'), 5000);
+});
+byId('game-exit').addEventListener('click', () => { cancelAnimationFrame(raf); gameScreen.classList.add('hidden'); gameScreen.classList.remove('perspective-active'); rolePanel.classList.add('hidden'); amongMenu.classList.remove('hidden'); });
+window.addEventListener('keydown', event => { if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'a', 's', 'd'].includes(event.key)) { keys.add(event.key); event.preventDefault(); } });
+window.addEventListener('keyup', event => keys.delete(event.key));
+window.addEventListener('resize', updateCamera);
