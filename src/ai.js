@@ -159,30 +159,25 @@ export async function generateSchedulerText(messages, settings = {}) {
 let activeSpeechController = null;
 let activeSpeechAudio = null;
 
-export async function speakWithFish(text, settings = {}) {
+export async function speakWithFish(text, settings = {}, player = null) {
     const key = settings.fishApiKey?.trim();
-    const referenceId = settings.fishVoiceId?.trim();
+    const referenceId = player?.aiConfig?.fishVoiceId?.trim() || player?.fishVoiceId?.trim();
     if (!key || !referenceId || !settings.fishEnabled) return;
 
     activeSpeechController?.abort();
     activeSpeechAudio?.pause();
     activeSpeechController = new AbortController();
 
-    const response = await fetch(settings.fishEndpoint || 'https://api.fish.audio/v1/tts', {
+    const response = await fetch(settings.fishEndpoint || 'https://mafia-voice-map.vercel.app/api/tts.js', {
         method: 'POST',
         signal: activeSpeechController.signal,
-        headers: {
-            'Authorization': `Bearer ${key}`,
-            'Content-Type': 'application/json',
-            'model': settings.fishModel || DEFAULT_FISH_MODEL
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             text,
             reference_id: referenceId,
-            format: 'mp3',
-            chunk_length: 300,
-            latency: 'low',
-            normalize: true
+            apiKey: key,
+            model: settings.fishModel || DEFAULT_FISH_MODEL,
+            format: 'mp3'
         })
     });
     if (!response.ok) throw new Error(`Fish Audio request failed (${response.status}).`);
